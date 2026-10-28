@@ -3,24 +3,24 @@
   "message": "项目维护者发布的未签名 IPA；需要自行签名安装。",
   "identifier": "ooiua.hongguo-ios.source",
   "sourceURL": "https://raw.githubusercontent.com/OOIUa/hongguo-ios/main/distribution/source.json",
-  "sourceicon": "https://raw.githubusercontent.com/OOIUa/hongguo-ios/v0.1.2/distribution/icon.png",
+  "sourceicon": "https://raw.githubusercontent.com/OOIUa/hongguo-ios/v0.1.3/distribution/icon.png",
   "apps": [
     {
       "name": "红果独立版",
       "type": "1",
       "bundleIdentifier": "com.ooiua.hongguo.ios",
-      "version": "0.1.2",
-      "build": 3,
+      "version": "0.1.3",
+      "build": 4,
       "minimumOSVersion": "17.0",
-      "versionDate": "2026-10-28T12:59:05Z",
-      "versionDescription": "同步 Android 0.7.8 的红果与播放键图标。\n统一 iOS 桌面、首页、关于页面及全能签软件源的品牌标识。\n未签名 IPA，需使用本人的证书签名后安装。",
+      "versionDate": "2026-10-28T14:05:58Z",
+      "versionDescription": "新增边下边播：读取索引后按需下载和解密，不再等待整集缓存完成。\n支持拖动补齐所需片段、分块缓存复用及切集取消。\n未签名 IPA，需使用本人的证书签名后安装。",
       "lock": "0",
-      "downloadURL": "https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.2/Hongguo-iOS-0.1.2-unsigned.ipa",
+      "downloadURL": "https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.3/Hongguo-iOS-0.1.3-unsigned.ipa",
       "isLanZouCloud": "0",
-      "iconURL": "https://raw.githubusercontent.com/OOIUa/hongguo-ios/v0.1.2/distribution/icon.png",
+      "iconURL": "https://raw.githubusercontent.com/OOIUa/hongguo-ios/v0.1.3/distribution/icon.png",
       "tintColor": "E8463F",
-      "size": "1118415",
-      "sha256": "3897d05c46a9119c98e7057b62fdb8ecb969051a7f5a3e51f552f32e075824c9"
+      "size": "1197934",
+      "sha256": "c88017833b6e4520faf1dcd1104a57a9f372a9296696b6be718007d243971d3d"
     }
   ]
 }
