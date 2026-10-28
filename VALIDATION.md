@@ -12,6 +12,10 @@
 - 结果：`build/UpdateUIFinal.xcresult`，日志：`build/update-ui-final.log`。本机 QA 文件不提交。
 - 新增 `scripts/test-updates-live.sh --live`，发版后使用生产更新客户端读取公开清单并下载、验证和清理 IPA；未带 `--live` 时拒绝联网。
 - GitHub Actions 在 `v*` 标签推送后构建无签名 IPA、发布对应源码并同步四份源 JSON。同步前重新下载已发布 IPA 核对实际内容，拒绝草稿/预发布，避免旧版本覆盖较新源，支持只恢复源。
+- 首次[自动发布运行](https://github.com/OOIUa/hongguo-ios/actions/runs/40657890712)已完整成功，[v0.1.1 Release](https://github.com/OOIUa/hongguo-ios/releases/tag/v0.1.1)已公开；源由机器人提交 `dc3d28e` 同步到 main。
+- 线上实际 IPA：1,095,964 字节，SHA-256 `546e0b6614ee52e9043758b887c5a8bf72e1b2c61511aa5f80a90892c5e35385`。已下载到本机 `dist/` 并与已发布校验文件一致；本机先前自行编译的包保留在 `build/local-pre-ci-artifacts/`，以线上包与源信息为准。
+- 生产 Swift 更新客户端实网探针通过：从官方源读取 0.1.1 / build 2，实际下载安装包，大小、SHA-256、ZIP 检查通过，临时文件清理通过，日志为 `build/update-live.log`。
+- 官方源、两条加速源，以及两条代理 IPA 下载均 HTTP 200；源中版本、大小、哈希与线上安装包一致。报告为 `build/online-release-verification.json`。这是本轮网络结果，不保证代理永久可用。
 - 本轮未在实体 iPhone 中重签安装，未在全能签客户端实际导入源；对应运行结果需要用户设备验证。
 
 ## 0.1.0 / build 1：初始移植
