@@ -1,0 +1,15 @@
+build/
+dist/
+.DS_Store
+*.xcuserstate
+xcuserdata/
+*.xcodeproj/project.xcworkspace/
+.build/
+*.ipa
+*.dSYM/
+*.mobileprovision
+*.p12
+*.p8
+.env
+.env.*
+Configuration/Local.xcconfig

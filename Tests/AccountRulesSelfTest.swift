@@ -1,0 +1,30 @@
+import Foundation
+
+@main
+struct AccountRulesSelfTest {
+    static func main() throws {
+        func check(_ value: @autoclosure () -> Bool, _ name: String) throws {
+            guard value() else { throw HGError.message("FAIL " + name) }
+        }
+        try check(AccountRules.businessID(true) == nil, "boolean-is-not-identity")
+        try check(AccountRules.businessID(NSNumber(value: true)) == nil, "boxed-boolean-is-not-identity")
+        try check(AccountRules.businessID(123.5) == nil, "float-is-not-identity")
+        try check(AccountRules.businessID(["id":"123"]) == nil, "object-is-not-identity")
+        try check(AccountRules.businessID("00000123") == "00000123", "leading-zero-preserved")
+        try check(AccountRules.businessID("Aa+_-中123") == "Aa+_-中123", "opaque-case-preserved")
+        try check(AccountRules.businessID("123\n") == nil, "control-rejected")
+        try check(AccountRules.businessID(" ") == nil, "blank-rejected")
+        try check(AccountRules.businessID("null") == nil, "sentinel-rejected")
+        try check(!AccountRules.websiteAuthenticated(["message":"success","data":["has_login":false,"user_id":"123"]]), "anonymous-flag-veto")
+        try check(!AccountRules.websiteAuthenticated(["message":"success","data":["has_login":"0","user_info":["user_id":"123"]]]), "nested-identity-anonymous-veto")
+        try check(AccountRules.websiteAuthenticated(["message":"success","data":["has_login":true]]), "explicit-website-login")
+        try check(AccountRules.websiteAuthenticated(["message":"success","data":["user_info":["uid_str":"000123"]]]), "nested-website-identity")
+        try check(!AccountRules.websiteAuthenticated(["message":"success","data":["code":0,"device_id":"123"]]), "device-is-not-account")
+        try check(!AccountRules.websiteAuthenticated(["message":"error","data":["has_login":true]]), "error-is-not-login")
+        try check(AccountRules.domainMatches(cookieDomain:".hongguoduanju.com",targetHost:"hongguoduanju.com"), "domain-cookie")
+        try check(!AccountRules.domainMatches(cookieDomain:"login.hongguoduanju.com",targetHost:"hongguoduanju.com"), "subdomain-cookie-stays-subdomain")
+        try check(!AccountRules.domainMatches(cookieDomain:"evilhongguoduanju.com",targetHost:"hongguoduanju.com"), "suffix-confusion-rejected")
+        try check(!AccountRules.domainMatches(cookieDomain:"hongguoduanju.com.evil.example",targetHost:"hongguoduanju.com"), "lookalike-host-rejected")
+        print("PASS account identity, website authentication, and cookie scope: 19 cases")
+    }
+}
