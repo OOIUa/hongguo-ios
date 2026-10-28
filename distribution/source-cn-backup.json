@@ -1,0 +1,26 @@
+{
+  "name": "红果 iOS · 国内备用加速",
+  "message": "项目维护者发布的未签名 IPA；需要自行签名安装。加速服务由第三方提供。",
+  "identifier": "ooiua.hongguo-ios.source-cn-backup",
+  "sourceURL": "https://ghfast.top/https://raw.githubusercontent.com/OOIUa/hongguo-ios/main/distribution/source-cn-backup.json",
+  "sourceicon": "https://ghfast.top/https://raw.githubusercontent.com/OOIUa/hongguo-ios/main/distribution/icon.png",
+  "apps": [
+    {
+      "name": "红果独立版",
+      "type": "1",
+      "bundleIdentifier": "com.ooiua.hongguo.ios",
+      "version": "0.1.1",
+      "build": 2,
+      "minimumOSVersion": "17.0",
+      "versionDate": "2026-10-28T08:37:10Z",
+      "versionDescription": "新增应用内检查更新、官方与加速线路切换。\n下载安装包后校验 SHA-256，可导出到自己的签名工具。\n新增全能签官方源及两条加速源，发版时同步更新。\n未签名 IPA，需使用本人的证书签名后安装。",
+      "lock": "0",
+      "downloadURL": "https://ghfast.top/https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.1/Hongguo-iOS-0.1.1-unsigned.ipa",
+      "isLanZouCloud": "0",
+      "iconURL": "https://ghfast.top/https://raw.githubusercontent.com/OOIUa/hongguo-ios/main/distribution/icon.png",
+      "tintColor": "C94426",
+      "size": "1095964",
+      "sha256": "546e0b6614ee52e9043758b887c5a8bf72e1b2c61511aa5f80a90892c5e35385"
+    }
+  ]
+}
