@@ -1,0 +1,83 @@
+name: Release unsigned iOS IPA and software feeds
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag, matching Configuration/Release.json
+        required: true
+        type: string
+      recover_feeds_only:
+        description: Recover feeds from the already published IPA, without building/replacing release assets
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+concurrency:
+  group: hongguo-ios-release
+  cancel-in-progress: false
+  queue: max
+
+jobs:
+  release:
+    runs-on: macos-latest
+    timeout-minutes: 40
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+      RECOVER_FEEDS_ONLY: ${{ inputs.recover_feeds_only || false }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          fetch-depth: 0
+      - name: Verify tag, repository, and main ancestry
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/generate-feeds.py --tag "$RELEASE_TAG" --config-only
+          git fetch origin main
+          git merge-base --is-ancestor "$RELEASE_TAG" origin/main
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          release = json.loads(Path('Configuration/Release.json').read_text())
+          assert release['repository'] == os.environ['GITHUB_REPOSITORY'], 'Repository differs from release configuration'
+          PY
+          xcodebuild -version
+      - name: Offline protocol, account, library and media tests
+        if: ${{ !inputs.recover_feeds_only }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/test-network.sh
+          bash scripts/test-account-rules.sh
+          bash scripts/test-updates.sh
+          bash scripts/test-library.sh
+          bash scripts/test-media.sh
+      - name: Build unsigned device IPA and generate verified feeds
+        if: ${{ !inputs.recover_feeds_only }}
+        run: bash scripts/release.sh "$RELEASE_TAG"
+      - name: Publish immutable IPA, checksum, feeds and update manifest
+        if: ${{ !inputs.recover_feeds_only }}
+        run: bash scripts/release-publish.sh "$RELEASE_TAG"
+      - name: Synchronize stable feed URLs on main
+        run: |
+          if [[ "$RECOVER_FEEDS_ONLY" == "true" ]]; then
+            bash scripts/release-sync-feeds.sh "$RELEASE_TAG" --from-release
+          else
+            bash scripts/release-sync-feeds.sh "$RELEASE_TAG"
+          fi
+      - name: Preserve build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-build-log
+          path: build/release-build.log
+          if-no-files-found: ignore
+          retention-days: 7

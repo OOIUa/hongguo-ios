@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """Package the corresponding source and build/test instructions without local build data."""
 import hashlib
+import json
 import os
 import zipfile
 from pathlib import Path
 
 root = Path(__file__).resolve().parent.parent
-output = root / 'dist/Hongguo-iOS-0.1.0-source.zip'
+version = json.loads((root / 'Configuration/Release.json').read_text())['version']
+output = root / f'dist/Hongguo-iOS-{version}-source.zip'
 output.parent.mkdir(exist_ok=True)
 excluded = {'build', 'dist', '.git', 'xcuserdata', '__pycache__', '.DS_Store', 'project.xcworkspace'}
 count = 0

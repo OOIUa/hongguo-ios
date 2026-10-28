@@ -2,6 +2,31 @@ import XCTest
 
 @MainActor
 final class HongguoQATests: XCTestCase {
+    func testUpdateSourcesAndVersion() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication(bundleIdentifier: "com.ooiua.hongguo.ios")
+        app.launch()
+        if app.buttons["开始发现好故事"].waitForExistence(timeout: 10) { app.buttons["开始发现好故事"].tap() }
+        XCTAssertTrue(app.tabBars.buttons["我的"].waitForExistence(timeout: 10))
+        app.tabBars.buttons["我的"].tap()
+        app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "下载新版本与全能签在线源")).firstMatch.tap()
+        XCTAssertTrue(app.buttons["updates.check"].waitForExistence(timeout: 5))
+        capture("16a-update-version")
+        XCTAssertTrue(app.debugDescription.contains("0.1.1"))
+        XCTAssertFalse(app.buttons["updates.export"].exists)
+        app.buttons["updates.route"].tap()
+        app.buttons["官方 GitHub"].tap()
+        for (identifier, title) in [("github", "官方 GitHub"), ("gh-proxy", "gh-proxy"), ("ghfast", "ghfast")] {
+            let copy = app.buttons["updates.copy.\(identifier)"]
+            if !copy.isHittable { app.swipeUp() }
+            XCTAssertTrue(copy.waitForExistence(timeout: 5)); copy.tap()
+            XCTAssertTrue(app.alerts["软件源"].waitForExistence(timeout: 3))
+            XCTAssertTrue(app.alerts.staticTexts["已复制\(title)软件源地址，可在全能签中手动添加。"].exists)
+            app.alerts.buttons["好"].tap()
+        }
+        capture("16-update-sources")
+    }
+
     func testRealNavigationAndPlayback() throws {
         continueAfterFailure = false
         let app = XCUIApplication(bundleIdentifier: "com.ooiua.hongguo.ios")

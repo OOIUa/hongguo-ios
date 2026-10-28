@@ -11,7 +11,8 @@ import zipfile
 from pathlib import Path
 
 root = Path(__file__).resolve().parent.parent
-ipa = Path(sys.argv[1]) if len(sys.argv) > 1 else root / 'dist/Hongguo-iOS-0.1.0-unsigned.ipa'
+release = json.loads((root / 'Configuration/Release.json').read_text())
+ipa = Path(sys.argv[1]) if len(sys.argv) > 1 else root / f'dist/Hongguo-iOS-{release["version"]}-unsigned.ipa'
 with zipfile.ZipFile(ipa) as archive:
     assert archive.testzip() is None, 'IPA archive is corrupt'
     prefix = 'Payload/Hongguo.app/'
@@ -21,7 +22,9 @@ with zipfile.ZipFile(ipa) as archive:
     info = plistlib.loads(archive.read(prefix + 'Info.plist'))
     assert info['CFBundleIdentifier'] == 'com.ooiua.hongguo.ios'
     assert info['CFBundleSupportedPlatforms'] == ['iPhoneOS']
-    assert info['MinimumOSVersion'] == '17.0'
+    assert info['MinimumOSVersion'] == release['minimumOSVersion']
+    assert info['CFBundleShortVersionString'] == release['version'], 'IPA version differs from Release.json'
+    assert info['CFBundleVersion'] == str(release['build']), 'IPA build differs from Release.json'
     assert prefix + 'PureSign.js' in names and prefix + 'BufferRuntime.js' in names
     assert prefix + 'Assets.car' in names
     assert not any(name.endswith('embedded.mobileprovision') for name in names)

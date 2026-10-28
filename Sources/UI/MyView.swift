@@ -15,9 +15,11 @@ struct MyView: View {
                     Divider().padding(.leading, 55)
                     NavigationLink { SettingsView() } label: { menuRow("设置", subtitle: "界面主题、播放偏好与缓存", symbol: "slider.horizontal.3") }
                     Divider().padding(.leading, 55)
+                    NavigationLink { UpdateView() } label: { menuRow("检查更新", subtitle: "下载新版本与全能签在线源", symbol: "arrow.down.circle") }
+                    Divider().padding(.leading, 55)
                     NavigationLink { AboutView() } label: { menuRow("关于红果独立版", subtitle: "版本与开源许可", symbol: "info.circle") }
                 }.background(model.appearance.surface, in: RoundedRectangle(cornerRadius: 21)).buttonStyle(.plain)
-                VStack(alignment: .leading, spacing: 8) { Text("让每个故事，都能接着看。").font(.subheadline.weight(.medium)); Text("本机收藏、观看历史和设置仅保存在这台设备。").font(.caption); Text("红果独立版 iOS · 0.1.0").font(.caption2) }.foregroundStyle(model.appearance.muted).frame(maxWidth: .infinity, alignment: .leading).padding(.top, 9)
+                VStack(alignment: .leading, spacing: 8) { Text("让每个故事，都能接着看。").font(.subheadline.weight(.medium)); Text("本机收藏、观看历史和设置仅保存在这台设备。").font(.caption); Text("红果独立版 iOS · \(appVersionText)").font(.caption2) }.foregroundStyle(model.appearance.muted).frame(maxWidth: .infinity, alignment: .leading).padding(.top, 9)
             }.padding(20)
         }.navigationTitle("我的").navigationBarTitleDisplayMode(.large).appBackground(model.appearance)
             .toolbar { ToolbarItem(placement: .topBarTrailing) { NavigationLink { SettingsView() } label: { Image(systemName: "gearshape") }.accessibilityLabel("设置") } }
@@ -36,7 +38,7 @@ struct SettingsView: View {
             Section("外观") { NavigationLink { ThemeSettingsView() } label: { HStack { Text("主题样式"); Spacer(); Text(model.theme.name).foregroundStyle(.secondary) } }; Toggle("深色模式时自动切换", isOn: $model.followSystemDark) }
             Section { Toggle("自动连播下一集", isOn: $model.autoNext); Toggle("下一集预加载", isOn: $model.preloadNext); Picker("默认播放速度", selection: $model.speed) { ForEach([Float(0.5), 0.75, 1, 1.25, 1.5, 2], id: \.self) { Text(String(format: "%g×", $0)).tag($0) } } } header: { Text("播放偏好") } footer: { Text("预加载会在前台播放后完整下载并准备下一集，可能使用较多流量和存储空间，默认关闭。切到后台后停止播放与预加载。") }
             Section { Button { confirmCache = true } label: { HStack { Text("清理播放缓存"); Spacer(); if clearing { ProgressView() } } }.disabled(clearing) } header: { Text("存储空间") } footer: { Text("播放缓存用于加速观看，不是永久离线保存。清理缓存不会删除收藏和历史。") }
-            Section { NavigationLink("关于与开源许可") { AboutView() } }
+            Section { NavigationLink("检查更新与全能签源") { UpdateView() }; NavigationLink("关于与开源许可") { AboutView() } }
         }.scrollContentBackground(.hidden).appBackground(model.appearance).tint(model.appearance.accent).navigationTitle("设置").navigationBarTitleDisplayMode(.inline)
             .confirmationDialog("清理播放缓存？", isPresented: $confirmCache, titleVisibility: .visible) { Button("清理缓存", role: .destructive) { clearCache() }; Button("取消", role: .cancel) {} }
             .alert("缓存", isPresented: Binding(get: { cacheMessage != nil }, set: { if !$0 { cacheMessage = nil } })) { Button("好") { cacheMessage = nil } } message: { Text(cacheMessage ?? "") }
@@ -66,9 +68,15 @@ struct AboutView: View {
     @EnvironmentObject private var model: AppModel
     var body: some View {
         Form {
-            Section { HStack(spacing: 16) { Text("果").font(.largeTitle.weight(.black)).foregroundStyle(.white).frame(width: 65, height: 65).background(Color(hex: 0xC94426), in: RoundedRectangle(cornerRadius: 20)); VStack(alignment: .leading, spacing: 6) { Text("红果独立版").font(.title2.bold()); Text("iOS 0.1.0").foregroundStyle(.secondary) } }.padding(.vertical, 8); Text("原生 iOS 短剧客户端。请求、媒体处理、缓存和播放在本机执行，无需配置服务器。") }
-            Section("开源") { Link("Android 原项目", destination: URL(string: "https://github.com/OOIUa/hongguo-android")!); Text("GPL-3.0-only").font(.subheadline); Text("本项目基于红果独立版 Android 移植。分发版本须保留开源许可与对应源码。协议及媒体核心参考 hongguo-web 与 hongguo-drama；第三方许可随源码提供。").font(.caption).foregroundStyle(.secondary) }
+            Section { HStack(spacing: 16) { Text("果").font(.largeTitle.weight(.black)).foregroundStyle(.white).frame(width: 65, height: 65).background(Color(hex: 0xC94426), in: RoundedRectangle(cornerRadius: 20)); VStack(alignment: .leading, spacing: 6) { Text("红果独立版").font(.title2.bold()); Text("iOS \(appVersionText)").foregroundStyle(.secondary) } }.padding(.vertical, 8); Text("原生 iOS 短剧客户端。请求、媒体处理、缓存和播放在本机执行，无需配置服务器。") }
+            Section("开源") { Link("iOS 项目与版本发布", destination: URL(string: "https://github.com/OOIUa/hongguo-ios")!); Link("Android 原项目", destination: URL(string: "https://github.com/OOIUa/hongguo-android")!); Text("GPL-3.0-only").font(.subheadline); Text("本项目基于红果独立版 Android 移植。分发版本须保留开源许可与对应源码。协议及媒体核心参考 hongguo-web 与 hongguo-drama；第三方许可随源码提供。").font(.caption).foregroundStyle(.secondary) }
             Section("使用说明") { Text("仅支持前台观看。缓存可能被清理，不提供永久离线下载。本机收藏和历史在卸载后移除。").font(.subheadline) }
         }.scrollContentBackground(.hidden).appBackground(model.appearance).navigationTitle("关于").navigationBarTitleDisplayMode(.inline)
     }
+}
+
+private var appVersionText: String {
+    let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "未知版本"
+    let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"
+    return "\(version) (\(build))"
 }

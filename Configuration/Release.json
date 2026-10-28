@@ -1,0 +1,11 @@
+{
+  "version": "0.1.1",
+  "build": 2,
+  "repository": "OOIUa/hongguo-ios",
+  "minimumOSVersion": "17.0",
+  "releaseNotes": [
+    "新增应用内检查更新、官方与加速线路切换。",
+    "下载安装包后校验 SHA-256，可导出到自己的签名工具。",
+    "新增全能签官方源及两条加速源，发版时同步更新。"
+  ]
+}

@@ -17,7 +17,8 @@ TASK_PACKAGE="$(mktemp -d "$TASK_ROOT/build/package.XXXXXX")"
 trap 'rm -rf "$TASK_PACKAGE"' EXIT
 mkdir -p "$TASK_PACKAGE/Payload"
 /usr/bin/ditto "$TASK_APP" "$TASK_PACKAGE/Payload/Hongguo.app"
-TASK_IPA="$TASK_ROOT/dist/Hongguo-iOS-0.1.0-unsigned.ipa"
+TASK_VERSION="$(/usr/bin/python3 -c 'import json; print(json.load(open("Configuration/Release.json"))["version"])')"
+TASK_IPA="$TASK_ROOT/dist/Hongguo-iOS-$TASK_VERSION-unsigned.ipa"
 TASK_ZIP_TMP="$TASK_PACKAGE/package.zip"
 (cd "$TASK_PACKAGE" && COPYFILE_DISABLE=1 /usr/bin/zip -qry "$TASK_ZIP_TMP" Payload)
 mv "$TASK_ZIP_TMP" "$TASK_IPA"

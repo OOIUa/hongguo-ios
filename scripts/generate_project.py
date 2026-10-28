@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 root = Path(__file__).resolve().parent.parent
+release = json.loads((root / 'Configuration/Release.json').read_text())
 project = root / 'Hongguo.xcodeproj'
 project.mkdir(exist_ok=True)
 
@@ -42,11 +43,11 @@ project_configs, target_configs = [], []
 for config in ('Debug', 'Release'):
     pc, tc = uid('project:' + config), uid('target:' + config)
     project_configs.append(pc); target_configs.append(tc)
-    objects[pc] = '{isa = XCBuildConfiguration; buildSettings = {CLANG_ENABLE_MODULES = YES; SWIFT_VERSION = 5.0; IPHONEOS_DEPLOYMENT_TARGET = 17.0; SDKROOT = iphoneos; }; name = ' + config + '; }'
+    objects[pc] = '{isa = XCBuildConfiguration; buildSettings = {CLANG_ENABLE_MODULES = YES; SWIFT_VERSION = 5.0; IPHONEOS_DEPLOYMENT_TARGET = ' + release['minimumOSVersion'] + '; SDKROOT = iphoneos; }; name = ' + config + '; }'
     settings = {
         'PRODUCT_NAME': 'Hongguo', 'PRODUCT_BUNDLE_IDENTIFIER': 'com.ooiua.hongguo.ios',
         'INFOPLIST_FILE': 'Configuration/Info.plist', 'GENERATE_INFOPLIST_FILE': 'NO',
-        'CURRENT_PROJECT_VERSION': '1', 'MARKETING_VERSION': '0.1.0',
+        'CURRENT_PROJECT_VERSION': str(release['build']), 'MARKETING_VERSION': release['version'],
         'CODE_SIGNING_ALLOWED': 'NO', 'CODE_SIGNING_REQUIRED': 'NO', 'CODE_SIGN_IDENTITY': '',
         'TARGETED_DEVICE_FAMILY': '1', 'SUPPORTED_PLATFORMS': 'iphoneos iphonesimulator',
         'SUPPORTS_MACCATALYST': 'NO', 'SWIFT_VERSION': '5.0',
