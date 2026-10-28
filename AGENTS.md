@@ -26,6 +26,7 @@
 ## 工程与验证
 
 - 源码在 `Sources/`，最低 iOS 17，依赖系统框架；用 `scripts/generate_project.py` 重新生成主 Xcode 工程。
+- 品牌图标已同步 Android 0.7.8 / `69c1d5a`。原始 XML 与来源在 `Branding/`，用 `xcrun swift scripts/make-icon.swift` 同时生成 AppIcon、应用内 BrandLogo 与 `distribution/icon.png`；不要恢复旧“果”字图标。业务移植基线仍以 README 为准。
 - `build/`、`dist/`、个人数据和密钥不进 Git；IPA/哈希等二进制交付物上传 GitHub Releases。
 - 修改网络、媒体、账号、本机库或更新规则后，运行对应 `scripts/test-*.sh`。新增发布逻辑运行 `scripts/test-feeds.py`。
 - 实网测试须显式传 `--live`。没有用户账号实测的登录、云写入不能宣称已验证。

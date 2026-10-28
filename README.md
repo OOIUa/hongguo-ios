@@ -4,6 +4,8 @@
 
 交付：iPhone arm64、iOS 17.0 及以上、无签名 IPA。安装前使用你自己的测试签名流程签名。
 
+应用图标与应用内标识同步自 Android 0.7.8（`69c1d5a`）的红果与播放键矢量素材，来源及重新生成方式见 [Branding/README.md](Branding/README.md)。
+
 ## 使用
 
 1. 在 [GitHub Releases](https://github.com/OOIUa/hongguo-ios/releases) 下载无签名 IPA，或按下方说明自行构建，使用你自己的签名流程签名并安装。构建产物保存在本机，安装包通过 Releases 分发。

@@ -138,6 +138,7 @@ def make_documents(config: dict, actual: dict, published_at: str) -> dict[str, d
     version, repository = config["version"], config["repository"]
     download = f"https://github.com/{repository}/releases/download/v{version}/Hongguo-iOS-{version}-unsigned.ipa"
     raw = f"https://raw.githubusercontent.com/{repository}/main/distribution/"
+    icon_url = f"https://raw.githubusercontent.com/{repository}/v{version}/distribution/icon.png"
     mirrors = {name: prefix + download for name, prefix in MIRRORS.items()}
     update = {"version": version, "build": config["build"], "minimumOSVersion": config["minimumOSVersion"],
               "releaseNotes": config["releaseNotes"], "publishedAt": published_at, "downloadURL": download,
@@ -147,12 +148,12 @@ def make_documents(config: dict, actual: dict, published_at: str) -> dict[str, d
               ("source-cn.json", "国内加速", MIRRORS["gh-proxy"], mirrors["gh-proxy"]),
               ("source-cn-backup.json", "国内备用加速", MIRRORS["ghfast"], mirrors["ghfast"])]
     for name, title, proxy, address in routes:
-        icon = proxy + raw + "icon.png"
+        icon = proxy + icon_url
         app = {"name": "红果独立版", "type": "1", "bundleIdentifier": BUNDLE_ID,
                "version": version, "build": config["build"], "minimumOSVersion": config["minimumOSVersion"],
                "versionDate": published_at, "versionDescription": "\n".join(config["releaseNotes"]) + "\n未签名 IPA，需使用本人的证书签名后安装。",
                "lock": "0", "downloadURL": address, "isLanZouCloud": "0", "iconURL": icon,
-               "tintColor": "C94426", "size": str(actual["size"]), "sha256": actual["sha256"]}
+               "tintColor": "E8463F", "size": str(actual["size"]), "sha256": actual["sha256"]}
         documents[name] = {"name": "红果 iOS · " + title,
                            "message": "项目维护者发布的未签名 IPA；需要自行签名安装。" + ("加速服务由第三方提供。" if proxy else ""),
                            "identifier": repository.lower().replace("/", ".") + "." + name.removesuffix(".json"),

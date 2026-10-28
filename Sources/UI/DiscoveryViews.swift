@@ -24,7 +24,7 @@ struct HomeView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
                 HStack(spacing: 10) {
-                    Text("果").font(.title2.weight(.black)).foregroundStyle(.white).frame(width: 40, height: 40).background(model.appearance.accent, in: RoundedRectangle(cornerRadius: 12))
+                    Image("BrandLogo").resizable().scaledToFit().frame(width: 40, height: 40).accessibilityHidden(true)
                     VStack(alignment: .leading, spacing: 2) { Text("红果剧场").font(.title2.bold()).foregroundStyle(model.appearance.ink); Text("好故事，随时接着看").font(.caption).foregroundStyle(model.appearance.muted) }
                     Spacer()
                 }

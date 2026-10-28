@@ -1,11 +1,10 @@
 {
-  "version": "0.1.1",
-  "build": 2,
+  "version": "0.1.2",
+  "build": 3,
   "repository": "OOIUa/hongguo-ios",
   "minimumOSVersion": "17.0",
   "releaseNotes": [
-    "新增应用内检查更新、官方与加速线路切换。",
-    "下载安装包后校验 SHA-256，可导出到自己的签名工具。",
-    "新增全能签官方源及两条加速源，发版时同步更新。"
+    "同步 Android 0.7.8 的红果与播放键图标。",
+    "统一 iOS 桌面、首页、关于页面及全能签软件源的品牌标识。"
   ]
 }

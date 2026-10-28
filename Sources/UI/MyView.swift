@@ -68,7 +68,7 @@ struct AboutView: View {
     @EnvironmentObject private var model: AppModel
     var body: some View {
         Form {
-            Section { HStack(spacing: 16) { Text("果").font(.largeTitle.weight(.black)).foregroundStyle(.white).frame(width: 65, height: 65).background(Color(hex: 0xC94426), in: RoundedRectangle(cornerRadius: 20)); VStack(alignment: .leading, spacing: 6) { Text("红果独立版").font(.title2.bold()); Text("iOS \(appVersionText)").foregroundStyle(.secondary) } }.padding(.vertical, 8); Text("原生 iOS 短剧客户端。请求、媒体处理、缓存和播放在本机执行，无需配置服务器。") }
+            Section { HStack(spacing: 16) { Image("BrandLogo").resizable().scaledToFit().frame(width: 65, height: 65).background(Color(hex: 0xFFF9F6), in: RoundedRectangle(cornerRadius: 20)).accessibilityHidden(true); VStack(alignment: .leading, spacing: 6) { Text("红果独立版").font(.title2.bold()); Text("iOS \(appVersionText)").foregroundStyle(.secondary) } }.padding(.vertical, 8); Text("原生 iOS 短剧客户端。请求、媒体处理、缓存和播放在本机执行，无需配置服务器。") }
             Section("开源") { Link("iOS 项目与版本发布", destination: URL(string: "https://github.com/OOIUa/hongguo-ios")!); Link("Android 原项目", destination: URL(string: "https://github.com/OOIUa/hongguo-android")!); Text("GPL-3.0-only").font(.subheadline); Text("本项目基于红果独立版 Android 移植。分发版本须保留开源许可与对应源码。协议及媒体核心参考 hongguo-web 与 hongguo-drama；第三方许可随源码提供。").font(.caption).foregroundStyle(.secondary) }
             Section("使用说明") { Text("仅支持前台观看。缓存可能被清理，不提供永久离线下载。本机收藏和历史在卸载后移除。").font(.subheadline) }
         }.scrollContentBackground(.hidden).appBackground(model.appearance).navigationTitle("关于").navigationBarTitleDisplayMode(.inline)

@@ -74,7 +74,7 @@ class FeedTests(unittest.TestCase):
             app = source["apps"][0]
             self.assertEqual(app["downloadURL"], prefix + direct)
             self.assertEqual(source["sourceURL"], prefix + "https://raw.githubusercontent.com/OOIUa/hongguo-ios/main/distribution/" + filename)
-            self.assertEqual(app["iconURL"], prefix + "https://raw.githubusercontent.com/OOIUa/hongguo-ios/main/distribution/icon.png")
+            self.assertEqual(app["iconURL"], prefix + "https://raw.githubusercontent.com/OOIUa/hongguo-ios/v0.1.1/distribution/icon.png")
             for key in ("version", "build", "minimumOSVersion", "sha256"):
                 self.assertEqual(app[key], update[key])
             self.assertEqual(int(app["size"]), update["size"])

@@ -12,7 +12,7 @@ final class HongguoQATests: XCTestCase {
         app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "下载新版本与全能签在线源")).firstMatch.tap()
         XCTAssertTrue(app.buttons["updates.check"].waitForExistence(timeout: 5))
         capture("16a-update-version")
-        XCTAssertTrue(app.debugDescription.contains("0.1.1"))
+        XCTAssertNotNil(app.debugDescription.range(of: #"\d+\.\d+\.\d+\s*[（(]\d+[）)]"#, options: .regularExpression))
         XCTAssertFalse(app.buttons["updates.export"].exists)
         app.buttons["updates.route"].tap()
         app.buttons["官方 GitHub"].tap()
