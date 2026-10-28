@@ -3,7 +3,7 @@ import Foundation
 import AVFoundation
 import CryptoKit
 
-/// Complete-file preparation is the compatibility-first playback path.
+/// Complete-file preparation is retained for optional next-episode preloading and legacy caches.
 /// A final file is visible only after download, CENC processing and validation succeed.
 actor MediaPreparer {
     static let shared = MediaPreparer()
@@ -17,6 +17,15 @@ actor MediaPreparer {
         fm.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("PreparedMedia-v1", isDirectory: true)
     }
     private struct CacheRecord: Codable { let bytes: Int; let sha256: String }
+
+    func cachedPlayback(track: VideoTrack, episodeID: String) throws -> URL? {
+        try Task.checkCancellation()
+        let key = HGCrypto.sha256(Data((episodeID + ":" + track.definition).utf8)).map { String(format: "%02x", $0) }.joined()
+        let movie = root.appendingPathComponent(key + ".mp4"), record = root.appendingPathComponent(key + ".json")
+        guard fm.fileExists(atPath: record.path) else { return nil }
+        do { return try cachedFile(movie, record: record) }
+        catch { try Task.checkCancellation(); return nil }
+    }
 
     func prepare(track: VideoTrack, episodeID: String, progress: @Sendable @escaping (String, Double) -> Void) async throws -> URL {
         try Task.checkCancellation()
@@ -100,6 +109,7 @@ actor MediaPreparer {
 
     func clearCache() async throws {
         active.removeAll()
+        try await ProgressiveCache.shared.clear()
         guard fm.fileExists(atPath: root.path) else { return }
         let files = try fm.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)
         for file in files where file.pathExtension != "part" {

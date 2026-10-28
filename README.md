@@ -10,7 +10,7 @@
 
 1. 在 [GitHub Releases](https://github.com/OOIUa/hongguo-ios/releases) 下载无签名 IPA，或按下方说明自行构建，使用你自己的签名流程签名并安装。构建产物保存在本机，安装包通过 Releases 分发。
 2. 从首页、发现或搜索选剧，进入详情后选择集数。
-3. 每集显示下载与处理进度，准备完成后播放。支持选集、上下滑切集、拖动、六档倍速和左半屏长按临时 2 倍速。
+3. 读取视频索引后边下边播，无需等待整集完成。拖动时按需补齐目标片段，已完成分块可复用。支持选集、上下滑切集、六档倍速和左半屏长按临时 2 倍速。
 4. 在本机片单查看收藏与历史，退出播放器后可恢复集数和位置。
 5. 「我的 → 设置」可切换暖白精修、沉浸暗场、内容卡片，并调整自动连播和可选下一集预加载。
 6. 「我的 → 红果账号」在官方页面自行完成登录。官网会话和手机业务身份分别验证；只有云账号确认后才开放账户收藏、最近历史与预约。
@@ -32,7 +32,8 @@
 
 ## 当前版本边界
 
-- 当前使用完整文件下载和媒体处理后播放，渐进边下边播尚未加入。下一集预加载会完整准备下一集，默认关闭；取消未完成预加载后再次打开会从头准备。
+- 支持 HTTP 分段读取的普通 MP4 与全样本 CENC 视频，按需下载并解密。索引位于文件尾部也可先读取索引再起播；碎片化 MP4、子样本/模式加密等格式暂不支持。
+- 当前集的完整分块校验后缓存，退出保留已完成分块，未完成的网络请求会取消。下一集预加载默认关闭；开启后在当前集缓存完成时准备完整下一集，取消未完成的下一集预加载后会重新准备。
 - 三种界面风格按 iOS 原生控件适配，共用播放器；只在前台播放。
 - 本机收藏与历史分别最多 200 部，独立管理。账号历史读取最近 50 部，预约各读取 20 部，收藏展示已读取批次；不宣称完整云端备份。
 - 账户收藏采用单次写入后回读核对；响应不确定时保留待核对状态，不自动重放收藏请求。
@@ -61,6 +62,7 @@ bash scripts/test-account-rules.sh
 bash scripts/test-library.sh
 bash scripts/test-network.sh
 bash scripts/test-media.sh
+bash scripts/test-progressive.sh
 bash scripts/test-updates.sh
 python3 scripts/test-feeds.py
 ```
@@ -70,6 +72,7 @@ python3 scripts/test-feeds.py
 ```sh
 bash scripts/test-network-live.sh --live
 bash scripts/test-media-live.sh --live
+bash scripts/test-progressive-live.sh --live
 ```
 
 详细证据与尚未验证的部分见 `VALIDATION.md`。测试程序不需要本人账号，不打印设备身份、Cookie、媒体密钥或完整媒体 URL。

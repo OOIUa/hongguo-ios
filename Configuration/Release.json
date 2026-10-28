@@ -1,10 +1,10 @@
 {
-  "version": "0.1.2",
-  "build": 3,
+  "version": "0.1.3",
+  "build": 4,
   "repository": "OOIUa/hongguo-ios",
   "minimumOSVersion": "17.0",
   "releaseNotes": [
-    "同步 Android 0.7.8 的红果与播放键图标。",
-    "统一 iOS 桌面、首页、关于页面及全能签软件源的品牌标识。"
+    "新增边下边播：读取索引后按需下载和解密，不再等待整集缓存完成。",
+    "支持拖动补齐所需片段、分块缓存复用及切集取消。"
   ]
 }

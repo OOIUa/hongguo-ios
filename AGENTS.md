@@ -30,6 +30,6 @@
 - `build/`、`dist/`、个人数据和密钥不进 Git；IPA/哈希等二进制交付物上传 GitHub Releases。
 - 修改网络、媒体、账号、本机库或更新规则后，运行对应 `scripts/test-*.sh`。新增发布逻辑运行 `scripts/test-feeds.py`。
 - 实网测试须显式传 `--live`。没有用户账号实测的登录、云写入不能宣称已验证。
-- 媒体目前整集准备后播放；不要描述为已经实现流式解密或渐进播放。
+- 从 0.1.3 起，默认播放使用 `ProgressivePlayback`：按范围下载、CENC 按样本解密、分块校验缓存，不等待整集完成。完整文件准备仅用于可选下一集预加载及旧版缓存；涉及这条链路须运行 `scripts/test-progressive.sh`，实网验证用 `scripts/test-progressive-live.sh --live`。
 
 以上是用户在本项目中的持续偏好；后续打包、发布和更新维护时自动遵守，无需反复询问签名方式。

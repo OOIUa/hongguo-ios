@@ -62,7 +62,7 @@ struct PlayerScreen: View {
     }
 
     private var preparationPanel: some View {
-        VStack(spacing: 15) { ProgressView().tint(.white).scaleEffect(1.2); Text(session.stage).font(.subheadline); if session.progress > 0 { ProgressView(value: session.progress).tint(Color(hex: 0xF07850)).frame(width: 180); Text("\(Int(session.progress * 100))%").font(.caption.monospacedDigit()).foregroundStyle(.white.opacity(0.65)) }; Text("首次播放需准备视频，请稍候").font(.caption2).foregroundStyle(.white.opacity(0.5)) }.padding(25).background(.black.opacity(0.45), in: RoundedRectangle(cornerRadius: 20))
+        VStack(spacing: 15) { ProgressView().tint(.white).scaleEffect(1.2); Text(session.stage).font(.subheadline); Text("正在准备首帧，无需等待整集下载").font(.caption2).foregroundStyle(.white.opacity(0.5)) }.padding(25).background(.black.opacity(0.45), in: RoundedRectangle(cornerRadius: 20))
     }
 
     private func errorPanel(_ message: String) -> some View {

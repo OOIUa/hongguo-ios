@@ -92,8 +92,49 @@ enum MP4Processor {
         }
     }
     private struct FileLayout { let length: Int; let moovOffset: Int; let moov: Data; let media: [Range<Int>]; let psshOffsets: [Int] }
-    private struct Sample { let offset: Int, size: Int; let iv: Data }
+    struct Sample: Sendable { let offset: Int, size: Int; let iv: Data }
     private struct Track { let handler: String, codec: String; let samples: [Sample]; let nalLengthBytes: Int }
+
+    struct StreamPatch: Sendable { let offset: Int; let data: Data }
+    struct StreamPlan: Sendable {
+        let length: Int
+        let patches: [StreamPatch]
+        let samples: [Sample]
+        let key: Data?
+        let probe: Sample?
+        let nalLength: Int
+    }
+
+    /// Builds a same-length clear virtual file using metadata alone, without reading mdat.
+    static func streamPlan(length: Int, moovOffset: Int, moov: Data, media: [Range<Int>],
+                           psshOffsets: [Int], encrypted: Bool, spade: String) throws -> StreamPlan {
+        guard length > 0, length <= maximumBytes, moov.count <= 32 * 1024 * 1024,
+              moovOffset >= 0, moovOffset <= length - moov.count, !media.isEmpty else { throw MediaError.invalidMedia }
+        let layout = FileLayout(length: length, moovOffset: moovOffset, moov: moov, media: media, psshOffsets: psshOffsets)
+        var bytes = Array(moov), count = 0
+        let roots = try parse(bytes, start: 0, end: bytes.count, depth: 0, count: &count)
+        guard roots.count == 1, roots[0].type == "moov", roots[0].children.contains(where: { $0.type == "trak" }) else { throw MediaError.invalidMedia }
+        let tracks = try readTracks(bytes, moov: roots[0], layout: layout)
+        guard encrypted ? !tracks.isEmpty : tracks.isEmpty else { throw MediaError.unsupported }
+        let video = tracks.first { $0.handler == "vide" }
+        if encrypted && video == nil { throw MediaError.unsupported }
+        let all = tracks.flatMap(\.samples).filter { $0.size > 0 }.sorted { $0.offset < $1.offset }
+        var end = 0
+        for sample in all {
+            guard sample.offset >= end else { throw MediaError.invalidMedia }
+            end = sample.offset + sample.size
+        }
+        if encrypted { try repair(&bytes, boxes: roots) }
+        var patches = [StreamPatch(offset: moovOffset, data: Data(bytes))]
+        if encrypted { patches += psshOffsets.map { StreamPatch(offset: $0 + 4, data: Data("free".utf8)) } }
+        return StreamPlan(length: length, patches: patches, samples: all,
+                          key: encrypted ? try SpadeKey.decode(spade) : nil,
+                          probe: video?.samples.first(where: { $0.size >= 8 }), nalLength: video?.nalLengthBytes ?? 4)
+    }
+
+    static func validateStreamProbe(_ plain: Data, plan: StreamPlan) throws {
+        guard nalChainValid(plain, lengthBytes: plan.nalLength) else { throw MediaError.invalidKey }
+    }
 
     static func validate(url: URL) throws {
         let layout = try inspectFile(url)

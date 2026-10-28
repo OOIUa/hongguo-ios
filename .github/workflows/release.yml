@@ -60,6 +60,7 @@ jobs:
           bash scripts/test-updates.sh
           bash scripts/test-library.sh
           bash scripts/test-media.sh
+          bash scripts/test-progressive.sh
       - name: Build unsigned device IPA and generate verified feeds
         if: ${{ !inputs.recover_feeds_only }}
         run: bash scripts/release.sh "$RELEASE_TAG"

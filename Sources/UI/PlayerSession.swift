@@ -29,6 +29,7 @@ final class PlayerSession: ObservableObject {
     private var warmURL: URL?
     private var warmEpisodeID: String?
     private var currentURL: URL?
+    private var currentStream: ProgressivePlayback?
     private var periodic: Any?
     private var observations: [NSKeyValueObservation] = []
     private var notifications: [NSObjectProtocol] = []
@@ -64,20 +65,32 @@ final class PlayerSession: ObservableObject {
         rendered = false; endMessage = nil; holding = false; scrubbing = false; prefetchStarted = false; finished = false
         requestTask = Task { [weak self] in
             do {
-                let url: URL
-                if let prepared { url = prepared }
+                let item: AVPlayerItem
+                if let prepared {
+                    guard let self, self.playID == ticket, !self.stopped else { await MediaPreparer.shared.unpin(prepared); return }
+                    self.currentURL = prepared; self.progress = 1
+                    item = AVPlayerItem(url: prepared)
+                }
                 else {
                     let track = try await DramaAPI.shared.track(episodeID: nextEpisode.id)
                     try Task.checkCancellation()
-                    url = try await MediaPreparer.shared.prepare(track: track, episodeID: nextEpisode.id) { [weak self] name, fraction in
-                        Task { @MainActor in guard let self, self.playID == ticket, !self.stopped else { return }; self.stage = name; self.progress = fraction.isFinite ? min(max(fraction, 0), 1) : 0 }
+                    if let url = try await MediaPreparer.shared.cachedPlayback(track: track, episodeID: nextEpisode.id) {
+                        await MediaPreparer.shared.pin(url)
+                        guard let self, self.playID == ticket, !self.stopped, !Task.isCancelled else { await MediaPreparer.shared.unpin(url); return }
+                        self.currentURL = url; self.progress = 1
+                        item = AVPlayerItem(url: url)
+                    } else {
+                        let stream = try await ProgressivePlayback.open(track: track, episodeID: nextEpisode.id) { [weak self] name, fraction in
+                            Task { @MainActor in guard let self, self.playID == ticket, !self.stopped else { return }; self.stage = name; self.progress = fraction.isFinite ? min(max(fraction, 0), 1) : 0 }
+                        }
+                        guard let self, self.playID == ticket, !self.stopped, !Task.isCancelled else { stream.close(); return }
+                        self.currentStream = stream
+                        item = AVPlayerItem(asset: stream.asset)
+                        item.preferredForwardBufferDuration = 3
                     }
-                    try Task.checkCancellation()
-                    await MediaPreparer.shared.pin(url)
                 }
-                guard let self, self.playID == ticket, !self.stopped, !Task.isCancelled else { await MediaPreparer.shared.unpin(url); return }
-                self.currentURL = url
-                self.install(url: url, startAt: saved, ticket: ticket)
+                guard let self, self.playID == ticket, !self.stopped, !Task.isCancelled else { return }
+                self.install(item: item, startAt: saved, ticket: ticket)
             } catch is CancellationError { if let prepared { await MediaPreparer.shared.unpin(prepared) } }
             catch {
                 guard let self, self.playID == ticket, !self.stopped else { return }
@@ -86,12 +99,11 @@ final class PlayerSession: ObservableObject {
         }
     }
 
-    private func install(url: URL, startAt: Double, ticket: UUID) {
+    private func install(item: AVPlayerItem, startAt: Double, ticket: UUID) {
         try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback)
         try? AVAudioSession.sharedInstance().setActive(true)
-        let item = AVPlayerItem(url: url)
         let next = AVPlayer(playerItem: item)
-        next.automaticallyWaitsToMinimizeStalling = true
+        next.automaticallyWaitsToMinimizeStalling = currentStream == nil
         player = next; preparing = false; buffering = true
         observations.append(item.observe(\.status, options: [.initial, .new]) { [weak self] item, _ in
             Task { @MainActor in
@@ -134,8 +146,8 @@ final class PlayerSession: ObservableObject {
         }
     }
 
-    func toggle() { if finished { load(index: index, startAt: 0) } else if isPlaying || (player?.rate ?? 0) > 0 { pause() } else { endHold(); endMessage = nil; player?.playImmediately(atRate: app.speed) } }
-    func pause() { endHold(); player?.pause(); isPlaying = false; saveProgress(flush: true) }
+    func toggle() { if finished { load(index: index, startAt: 0) } else if isPlaying || (player?.rate ?? 0) > 0 { pause() } else { endHold(); endMessage = nil; currentStream?.resume(); player?.playImmediately(atRate: app.speed) } }
+    func pause() { endHold(); player?.pause(); currentStream?.pause(); isPlaying = false; saveProgress(flush: true) }
     func setSpeed(_ speed: Float) { app.speed = speed; holding = false; if isPlaying { player?.rate = speed } }
     func beginHold() { guard isPlaying, rendered, !scrubbing else { return }; holding = true; player?.rate = 2 }
     func endHold() { guard holding else { return }; holding = false; if (player?.rate ?? 0) > 0 { player?.rate = app.speed } }
@@ -163,8 +175,7 @@ final class PlayerSession: ObservableObject {
 
     private func prefetchIfReady() {
         guard app.preloadNext, rendered, isPlaying, !prefetchStarted, index + 1 < detail.episodes.count,
-              let range = player?.currentItem?.loadedTimeRanges.first?.timeRangeValue,
-              range.start.seconds + range.duration.seconds - position >= 5 else { return }
+              currentStream == nil || progress >= 0.999 else { return }
         prefetchStarted = true
         let next = detail.episodes[index + 1], ticket = playID
         warmTask = Task { [weak self] in
@@ -199,6 +210,7 @@ final class PlayerSession: ObservableObject {
         if let periodic, let player { player.removeTimeObserver(periodic) }; periodic = nil
         observations.removeAll(); notifications.forEach { NotificationCenter.default.removeObserver($0) }; notifications.removeAll()
         player?.replaceCurrentItem(with: nil); player = nil; isPlaying = false; buffering = false
+        currentStream?.close(); currentStream = nil
         if let url = currentURL { Task { await MediaPreparer.shared.unpin(url) } }; currentURL = nil
     }
 
