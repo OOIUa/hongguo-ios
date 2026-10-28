@@ -7,6 +7,9 @@
 - 首页与关于页面已使用 BrandLogo。设备 Release 构建通过，包内 0.1.2 / build 3、iPhoneOS arm64、最低 iOS 17，未签名且无内嵌描述文件。
 - 实际 Assets.car 已确认含 AppIcon（1024 × 1024，Opaque）与 BrandLogo（224 × 224，透明）。
 - 软件源图标改用对应版本标签 URL，订阅地址不变，避免版本升级后继续使用旧图标缓存。
+- [0.1.2 自动发布](https://github.com/OOIUa/hongguo-ios/actions/runs/40692156508)全部成功，三条全能签源和更新清单已由 `c2fb0d9` 同步到 main。
+- 已下载线上无签名 IPA 复核：1,118,415 字节，SHA-256 `3897d05c46a9119c98e7057b62fdb8ecb969051a7f5a3e51f552f32e075824c9`。与线上源一致，生产更新客户端实网下载和校验通过，日志为 `build/update-live-0.1.2.log`。
+- 对应标签的官方/两条代理图标均 HTTP 200，文件哈希与本地 AppIcon 一致；用户安装新版后确认 iPhone 桌面图标正常。
 
 ## 0.1.1 / build 2：更新与发布
 
