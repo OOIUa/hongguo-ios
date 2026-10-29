@@ -1,18 +1,18 @@
 {
-  "version": "0.1.4",
-  "build": 5,
+  "version": "0.1.5",
+  "build": 6,
   "minimumOSVersion": "17.0",
   "releaseNotes": [
-    "播放器上下切集改为跟手翻页：拖动时画面随手指移动，相邻集数同步滑入，拖过约三成屏高或快速滑动即切换，不足则回弹并继续播放。",
-    "自动连播、上一集/下一集按钮与选集面板改为同样的滑动过渡；首帧出现后画面淡入。",
-    "视频加载中或加载失败时也可直接上下滑动换集；首集和末集带回弹提示。"
+    "启动时自动检查更新：发现新版本会弹窗显示版本与更新说明，可直接进入更新页下载并校验 IPA。",
+    "弹窗支持“稍后”与“忽略此版本”；检查失败不打扰，主题选择或播放时会等关闭后再提示。",
+    "“检查更新”页新增“启动时检查更新”开关，默认开启。"
   ],
-  "publishedAt": "2026-10-29T13:14:41Z",
-  "downloadURL": "https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.4/Hongguo-iOS-0.1.4-unsigned.ipa",
-  "sha256": "fd525f25adb174c6e0da756536f4fa9c378af3c248f531598121ffee1fa56ae9",
-  "size": 1217468,
+  "publishedAt": "2026-10-29T14:08:40Z",
+  "downloadURL": "https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.5/Hongguo-iOS-0.1.5-unsigned.ipa",
+  "sha256": "58f15d33fd541623b81c81ec99f56b51236e8abd04d912d8e298bab98cc1047d",
+  "size": 1231048,
   "mirrors": {
-    "gh-proxy": "https://gh-proxy.com/https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.4/Hongguo-iOS-0.1.4-unsigned.ipa",
-    "ghfast": "https://ghfast.top/https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.4/Hongguo-iOS-0.1.4-unsigned.ipa"
+    "gh-proxy": "https://gh-proxy.com/https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.5/Hongguo-iOS-0.1.5-unsigned.ipa",
+    "ghfast": "https://ghfast.top/https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.5/Hongguo-iOS-0.1.5-unsigned.ipa"
   }
 }

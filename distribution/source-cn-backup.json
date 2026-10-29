@@ -3,24 +3,24 @@
   "message": "项目维护者发布的未签名 IPA；需要自行签名安装。加速服务由第三方提供。",
   "identifier": "ooiua.hongguo-ios.source-cn-backup",
   "sourceURL": "https://ghfast.top/https://raw.githubusercontent.com/OOIUa/hongguo-ios/main/distribution/source-cn-backup.json",
-  "sourceicon": "https://ghfast.top/https://raw.githubusercontent.com/OOIUa/hongguo-ios/v0.1.4/distribution/icon.png",
+  "sourceicon": "https://ghfast.top/https://raw.githubusercontent.com/OOIUa/hongguo-ios/v0.1.5/distribution/icon.png",
   "apps": [
     {
       "name": "红果独立版",
       "type": "1",
       "bundleIdentifier": "com.ooiua.hongguo.ios",
-      "version": "0.1.4",
-      "build": 5,
+      "version": "0.1.5",
+      "build": 6,
       "minimumOSVersion": "17.0",
-      "versionDate": "2026-10-29T13:14:41Z",
-      "versionDescription": "播放器上下切集改为跟手翻页：拖动时画面随手指移动，相邻集数同步滑入，拖过约三成屏高或快速滑动即切换，不足则回弹并继续播放。\n自动连播、上一集/下一集按钮与选集面板改为同样的滑动过渡；首帧出现后画面淡入。\n视频加载中或加载失败时也可直接上下滑动换集；首集和末集带回弹提示。\n未签名 IPA，需使用本人的证书签名后安装。",
+      "versionDate": "2026-10-29T14:08:40Z",
+      "versionDescription": "启动时自动检查更新：发现新版本会弹窗显示版本与更新说明，可直接进入更新页下载并校验 IPA。\n弹窗支持“稍后”与“忽略此版本”；检查失败不打扰，主题选择或播放时会等关闭后再提示。\n“检查更新”页新增“启动时检查更新”开关，默认开启。\n未签名 IPA，需使用本人的证书签名后安装。",
       "lock": "0",
-      "downloadURL": "https://ghfast.top/https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.4/Hongguo-iOS-0.1.4-unsigned.ipa",
+      "downloadURL": "https://ghfast.top/https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.5/Hongguo-iOS-0.1.5-unsigned.ipa",
       "isLanZouCloud": "0",
-      "iconURL": "https://ghfast.top/https://raw.githubusercontent.com/OOIUa/hongguo-ios/v0.1.4/distribution/icon.png",
+      "iconURL": "https://ghfast.top/https://raw.githubusercontent.com/OOIUa/hongguo-ios/v0.1.5/distribution/icon.png",
       "tintColor": "E8463F",
-      "size": "1217468",
-      "sha256": "fd525f25adb174c6e0da756536f4fa9c378af3c248f531598121ffee1fa56ae9"
+      "size": "1231048",
+      "sha256": "58f15d33fd541623b81c81ec99f56b51236e8abd04d912d8e298bab98cc1047d"
     }
   ]
 }
