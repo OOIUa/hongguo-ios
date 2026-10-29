@@ -15,8 +15,6 @@ struct RootView: View {
     @AppStorage("hasChosenTheme") private var hasChosenTheme = false
     @State private var welcomeVisible = false
     @State private var pendingTheme = AppTheme.warm
-    @State private var launchUpdate: UpdateManifest?
-    @State private var updateSheetVisible = false
 
     var body: some View {
         TabView(selection: $model.tab) {
@@ -39,21 +37,11 @@ struct RootView: View {
             if phase != .active { library.flush() }
             else { AccountService.shared.resumePendingUploads() }
         }
-        // Held until the theme welcome and the player are closed, so the prompt never hides behind them.
-        .alert("发现新版本", isPresented: Binding(get: { launchUpdate != nil && !welcomeVisible && model.playback == nil }, set: { if !$0 { launchUpdate = nil } }), presenting: launchUpdate) { manifest in
-            Button("查看更新") { launchUpdate = nil; updateSheetVisible = true }
-            Button("忽略此版本") { UpdateService.shared.ignore(manifest); launchUpdate = nil }
-            Button("稍后", role: .cancel) { launchUpdate = nil }
-        } message: { manifest in
-            Text((["\(manifest.version)（\(manifest.build)）已发布，当前为 \(UpdateService.shared.currentVersion)。"] + manifest.releaseNotes.prefix(4).map { "• " + $0 }).joined(separator: "\n"))
-        }
-        .sheet(isPresented: $updateSheetVisible) {
-            NavigationStack { UpdateView().toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { updateSheetVisible = false } } } }
-                .environmentObject(model)
-        }
+        .modifier(LaunchUpdatePrompt(deferred: updatePromptDeferred))
         .task { if AccountService.shared.hasCredentials { await AccountService.shared.verify() } }
-        .task { launchUpdate = await UpdateService.shared.checkOnLaunch() }
     }
+
+    private var updatePromptDeferred: Bool { welcomeVisible || model.playback != nil }
 
     private func stack<Content: View>(@ViewBuilder content: () -> Content) -> some View {
         NavigationStack { content().navigationDestination(for: Drama.self) { DetailView(drama: $0) } }
@@ -63,5 +51,34 @@ struct RootView: View {
         NavigationStack {
             ScrollView { VStack(alignment: .leading, spacing: 18) { Text("选择喜欢的界面风格").font(.title2.bold()).foregroundStyle(model.appearance.ink); Text("三种风格，同样精彩。之后可在「我的 › 设置 › 主题样式」随时切换。").font(.subheadline).foregroundStyle(model.appearance.muted); ForEach(AppTheme.allCases) { theme in Button { pendingTheme = theme } label: { ThemePreview(theme: theme, selected: pendingTheme == theme) }.buttonStyle(.plain) }; Button { model.theme = pendingTheme; hasChosenTheme = true; welcomeVisible = false } label: { Text("开始发现好故事").font(.headline).frame(maxWidth: .infinity).padding(.vertical, 8) }.buttonStyle(.borderedProminent).tint(model.appearance.accent); Button("暂不选择，保持当前风格") { hasChosenTheme = true; welcomeVisible = false }.font(.caption).frame(maxWidth: .infinity).foregroundStyle(model.appearance.muted) }.padding(22) }.background(model.appearance.background).toolbar { ToolbarItem(placement: .confirmationAction) { Button("稍后") { hasChosenTheme = true; welcomeVisible = false } } }
         }.presentationDragIndicator(.visible)
+    }
+}
+
+/// Launch-time update prompt, held while `deferred` (theme welcome or player on screen) so it never hides behind them.
+private struct LaunchUpdatePrompt: ViewModifier {
+    @EnvironmentObject private var model: AppModel
+    let deferred: Bool
+    @State private var release: UpdateManifest?
+    @State private var sheetVisible = false
+
+    private var alertVisible: Binding<Bool> {
+        Binding(get: { release != nil && !deferred }, set: { if !$0 { release = nil } })
+    }
+    private func summary(_ manifest: UpdateManifest) -> String {
+        let heading = "\(manifest.version)（\(manifest.build)）已发布，当前为 \(UpdateService.shared.currentVersion)。"
+        return ([heading] + manifest.releaseNotes.prefix(4).map { "• " + $0 }).joined(separator: "\n")
+    }
+    func body(content: Content) -> some View {
+        content
+            .alert("发现新版本", isPresented: alertVisible, presenting: release) { manifest in
+                Button("查看更新") { release = nil; sheetVisible = true }
+                Button("忽略此版本") { UpdateService.shared.ignore(manifest); release = nil }
+                Button("稍后", role: .cancel) { release = nil }
+            } message: { manifest in Text(summary(manifest)) }
+            .sheet(isPresented: $sheetVisible) {
+                NavigationStack { UpdateView().toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { sheetVisible = false } } } }
+                    .environmentObject(model)
+            }
+            .task { release = await UpdateService.shared.checkOnLaunch() }
     }
 }
