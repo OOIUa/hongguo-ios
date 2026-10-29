@@ -14,10 +14,13 @@ struct HomeView: View {
         }
         .navigationTitle(model.appearance == .immersive ? "红果剧场" : "")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar { ToolbarItem(placement: .topBarTrailing) { Button { load(reset: true) } label: { Image(systemName: "arrow.clockwise") }.accessibilityLabel("刷新首页") } }
-        .appBackground(model.appearance)
+        .appBackground(model.appearance).tabRoot(model.appearance)
         .task { if loader.dramas.isEmpty { load(reset: true) } }
         .onChange(of: feed) { _, _ in load(reset: true) }
+    }
+
+    private var refreshButton: some View {
+        Button { load(reset: true) } label: { HeaderIcon(symbol: "arrow.clockwise") }.buttonStyle(.plain).accessibilityLabel("刷新首页")
     }
 
     private var classicHome: some View {
@@ -27,6 +30,7 @@ struct HomeView: View {
                     Image("BrandLogo").resizable().scaledToFit().frame(width: 40, height: 40).accessibilityHidden(true)
                     VStack(alignment: .leading, spacing: 2) { Text("红果剧场").font(.title2.bold()).foregroundStyle(model.appearance.ink); Text("好故事，随时接着看").font(.caption).foregroundStyle(model.appearance.muted) }
                     Spacer()
+                    refreshButton
                 }
                 SearchEntry()
                 if let first = loader.dramas.first, model.appearance == .warm { featured(first) }
@@ -38,7 +42,7 @@ struct HomeView: View {
                 }
                 if loader.dramas.isEmpty && !loader.isLoading && loader.error == nil { EmptyStateView(symbol: "sparkles.tv", title: "这一页暂时没有剧集", message: "可以刷新，或切换上方的内容类型。") }
                 LoadMoreView(loader: loader) { load(reset: loader.dramas.isEmpty) }
-            }.padding(.horizontal, 20).padding(.bottom, 24)
+            }.padding(.horizontal, 20).padding(.top, 8).padding(.bottom, 24)
         }.refreshable { load(reset: true) }
     }
 
@@ -93,6 +97,7 @@ struct HomeView: View {
     private var immersiveHome: some View {
         ScrollView(.vertical) {
             LazyVStack(spacing: 16) {
+                TabHeader(title: "红果剧场") { refreshButton }.padding(.horizontal, 20).padding(.top, 8)
                 feedSelector.padding(.horizontal, 20)
                 SearchEntry().padding(.horizontal, 20)
                 ForEach(loader.dramas) { drama in
@@ -131,6 +136,7 @@ struct DiscoverView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
+                TabHeader(title: model.appearance == .immersive ? "剧场" : "发现")
                 SearchEntry(title: "搜索剧名或关键词")
                 HStack(spacing: 10) { ForEach(genres, id: \.0) { value, name in ChoiceChip(title: name, selected: genre == value) { genre = value } }; Spacer(minLength: 0) }
                 Button { draft = selection; filtersVisible = true } label: {
@@ -143,9 +149,9 @@ struct DiscoverView: View {
                 }
                 if loader.dramas.isEmpty && !loader.isLoading && loader.error == nil { EmptyStateView(symbol: "line.3.horizontal.decrease.circle", title: "没有符合条件的剧集", message: "试试减少筛选条件，或切换内容类型。") }
                 LoadMoreView(loader: loader) { load(reset: loader.dramas.isEmpty) }
-            }.padding(20)
-        }.navigationTitle(model.appearance == .immersive ? "剧场" : "发现").navigationBarTitleDisplayMode(.large)
-            .appBackground(model.appearance)
+            }.padding(.horizontal, 20).padding(.top, 8).padding(.bottom, 20)
+        }.navigationTitle(model.appearance == .immersive ? "剧场" : "发现")
+            .appBackground(model.appearance).tabRoot(model.appearance)
             .refreshable { load(reset: true) }
             .task(id: genre) { selection = [:]; draft = [:]; load(reset: true); await loadFilters() }
             .sheet(isPresented: $filtersVisible) { filterSheet }

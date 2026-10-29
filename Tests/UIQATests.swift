@@ -40,7 +40,7 @@ final class HongguoQATests: XCTestCase {
         XCTAssertTrue(app.staticTexts["从一部好剧开始"].waitForExistence(timeout: 5))
         capture("03-library-empty")
         app.tabBars.buttons["我的"].tap(); capture("04-my")
-        app.navigationBars.buttons["设置"].tap()
+        app.buttons["my.settings"].tap()
         app.staticTexts["主题样式"].tap(); capture("05-theme-settings")
         app.staticTexts["沉浸暗场"].tap()
         app.tabBars.buttons["首页"].tap()

@@ -17,19 +17,10 @@ struct RootView: View {
     @State private var pendingTheme = AppTheme.warm
 
     var body: some View {
-        TabView(selection: $model.tab) {
-            stack { HomeView() }.tabItem { Label("首页", systemImage: "house") }.tag(0)
-            stack { DiscoverView() }.tabItem { Label(model.appearance == .immersive ? "剧场" : "发现", systemImage: "safari") }.tag(1)
-            stack { LibraryView() }.tabItem { Label(model.appearance == .immersive ? "追剧" : "片单", systemImage: "rectangle.stack") }.tag(2)
-            stack { MyView() }.tabItem { Label("我的", systemImage: "person.crop.circle") }.tag(3)
-        }
-        .tint(model.appearance.accent)
-        .toolbarBackground(model.appearance.background, for: .tabBar)
-        .toolbarBackground(.visible, for: .tabBar)
-        .environment(\.colorScheme, model.appearance == .immersive ? .dark : .light)
+        tabs
         .fullScreenCover(item: $model.playback) { request in PlayerScreen(request: request, model: model).environmentObject(library) }
-        .overlay { if model.openingDramaID != nil { ZStack { Color.black.opacity(0.12).ignoresSafeArea(); ProgressView("正在获取选集…").padding(23).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 19)) } } }
-        .alert("暂时无法播放", isPresented: Binding(get: { model.openError != nil }, set: { if !$0 { model.openError = nil } })) { Button("好") { model.openError = nil } } message: { Text(model.openError ?? "") }
+        .overlay { openingOverlay }
+        .alert("暂时无法播放", isPresented: openErrorVisible) { Button("好") { model.openError = nil } } message: { Text(model.openError ?? "") }
         .sheet(isPresented: $welcomeVisible, onDismiss: { hasChosenTheme = true }) { themeWelcome }
         .onAppear { model.systemDark = systemScheme == .dark; if !hasChosenTheme { pendingTheme = model.theme; welcomeVisible = true } }
         .onChange(of: systemScheme) { _, scheme in model.systemDark = scheme == .dark }
@@ -41,6 +32,24 @@ struct RootView: View {
         .task { if AccountService.shared.hasCredentials { await AccountService.shared.verify() } }
     }
 
+    // Kept out of `body`: the release runner's compiler times out type-checking long inline modifier chains.
+    private var tabs: some View {
+        let immersive = model.appearance == .immersive
+        return TabView(selection: $model.tab) {
+            stack { HomeView() }.tabItem { Label("首页", systemImage: "house") }.tag(0)
+            stack { DiscoverView() }.tabItem { Label(immersive ? "剧场" : "发现", systemImage: "safari") }.tag(1)
+            stack { LibraryView() }.tabItem { Label(immersive ? "追剧" : "片单", systemImage: "rectangle.stack") }.tag(2)
+            stack { MyView() }.tabItem { Label("我的", systemImage: "person.crop.circle") }.tag(3)
+        }
+        .tint(model.appearance.accent)
+        .toolbarBackground(model.appearance.background, for: .tabBar)
+        .toolbarBackground(.visible, for: .tabBar)
+        .environment(\.colorScheme, immersive ? .dark : .light)
+    }
+    @ViewBuilder private var openingOverlay: some View {
+        if model.openingDramaID != nil { ZStack { Color.black.opacity(0.12).ignoresSafeArea(); ProgressView("正在获取选集…").padding(23).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 19)) } }
+    }
+    private var openErrorVisible: Binding<Bool> { Binding(get: { model.openError != nil }, set: { if !$0 { model.openError = nil } }) }
     private var updatePromptDeferred: Bool { welcomeVisible || model.playback != nil }
 
     private func stack<Content: View>(@ViewBuilder content: () -> Content) -> some View {

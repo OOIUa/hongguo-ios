@@ -112,6 +112,27 @@ struct SectionHeading: View {
     }
 }
 
+/// Compact in-content title row for tab roots, which hide the system navigation bar (its large title left a tall empty band).
+struct TabHeader<Trailing: View>: View {
+    @EnvironmentObject private var model: AppModel
+    let title: String
+    @ViewBuilder var trailing: Trailing
+    var body: some View {
+        HStack(spacing: 12) { Text(title).font(.largeTitle.bold()).foregroundStyle(model.appearance.ink).accessibilityAddTraits(.isHeader); Spacer(minLength: 0); trailing }
+    }
+}
+extension TabHeader where Trailing == EmptyView { init(title: String) { self.init(title: title) { EmptyView() } } }
+
+struct HeaderIcon: View {
+    @EnvironmentObject private var model: AppModel
+    let symbol: String
+    var body: some View { Image(systemName: symbol).font(.system(size: 17, weight: .semibold)).foregroundStyle(model.appearance.accent).frame(width: 40, height: 40).background(model.appearance.surface, in: Circle()) }
+}
+
 extension View {
     func appBackground(_ theme: AppTheme) -> some View { self.background(theme.background.ignoresSafeArea()).toolbarBackground(theme.background, for: .navigationBar).toolbarBackground(.visible, for: .navigationBar) }
+    /// Tab roots draw their own header; a zero-height inset keeps scrolled content from showing under the status bar.
+    func tabRoot(_ theme: AppTheme) -> some View {
+        self.toolbar(.hidden, for: .navigationBar).safeAreaInset(edge: .top, spacing: 0) { Color.clear.frame(height: 0).background(theme.background) }
+    }
 }

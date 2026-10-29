@@ -6,23 +6,18 @@ struct MyView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 20) {
+                TabHeader(title: "我的") { NavigationLink { SettingsView() } label: { HeaderIcon(symbol: "gearshape") }.buttonStyle(.plain).accessibilityLabel("设置").accessibilityIdentifier("my.settings") }
                 NavigationLink { AccountView() } label: {
                     HStack(spacing: 15) { Image(systemName: "person.crop.circle").font(.system(size: 43, weight: .light)).foregroundStyle(model.appearance.accent).frame(width: 62, height: 62).background(model.appearance.soft, in: RoundedRectangle(cornerRadius: 20)); VStack(alignment: .leading, spacing: 7) { Text("红果账号").font(.title3.bold()).foregroundStyle(model.appearance.ink); Text("登录方式、云片单与账号管理").font(.caption).foregroundStyle(model.appearance.muted) }; Spacer(); Image(systemName: "chevron.right").font(.caption).foregroundStyle(model.appearance.muted) }.padding(19).background(model.appearance.surface, in: RoundedRectangle(cornerRadius: 22))
                 }.buttonStyle(.plain)
                 HStack(spacing: 14) { stat("本机收藏", count: library.favorites.count, symbol: "star"); stat("本机看过", count: library.history.count, symbol: "clock") }
                 VStack(spacing: 0) {
-                    NavigationLink { LibraryView() } label: { menuRow("播放历史", subtitle: "继续上次看到的地方", symbol: "clock.arrow.circlepath") }
+                    Button { model.tab = 2 } label: { menuRow("播放历史", subtitle: "继续上次看到的地方", symbol: "clock.arrow.circlepath") }
                     Divider().padding(.leading, 55)
-                    NavigationLink { SettingsView() } label: { menuRow("设置", subtitle: "界面主题、播放偏好与缓存", symbol: "slider.horizontal.3") }
-                    Divider().padding(.leading, 55)
-                    NavigationLink { UpdateView() } label: { menuRow("检查更新", subtitle: "下载新版本与全能签在线源", symbol: "arrow.down.circle") }
-                    Divider().padding(.leading, 55)
-                    NavigationLink { AboutView() } label: { menuRow("关于红果独立版", subtitle: "版本与开源许可", symbol: "info.circle") }
+                    NavigationLink { SettingsView() } label: { menuRow("设置", subtitle: "主题、播放偏好、缓存、更新与关于", symbol: "slider.horizontal.3") }
                 }.background(model.appearance.surface, in: RoundedRectangle(cornerRadius: 21)).buttonStyle(.plain)
-                VStack(alignment: .leading, spacing: 8) { Text("让每个故事，都能接着看。").font(.subheadline.weight(.medium)); Text("本机收藏、观看历史和设置仅保存在这台设备。").font(.caption); Text("红果独立版 iOS · \(appVersionText)").font(.caption2) }.foregroundStyle(model.appearance.muted).frame(maxWidth: .infinity, alignment: .leading).padding(.top, 9)
-            }.padding(20)
-        }.navigationTitle("我的").navigationBarTitleDisplayMode(.large).appBackground(model.appearance)
-            .toolbar { ToolbarItem(placement: .topBarTrailing) { NavigationLink { SettingsView() } label: { Image(systemName: "gearshape") }.accessibilityLabel("设置") } }
+            }.padding(.horizontal, 20).padding(.top, 8).padding(.bottom, 20)
+        }.navigationTitle("我的").appBackground(model.appearance).tabRoot(model.appearance)
     }
     private func stat(_ title: String, count: Int, symbol: String) -> some View { Button { model.tab = 2 } label: { VStack(alignment: .leading, spacing: 14) { HStack { Text(title).font(.caption); Spacer(); Image(systemName: symbol) }.foregroundStyle(model.appearance.muted); Text("\(count)").font(.system(size: 31, weight: .bold, design: .rounded)).foregroundStyle(model.appearance.ink) }.padding(19).frame(maxWidth: .infinity).background(model.appearance.surface, in: RoundedRectangle(cornerRadius: 20)) }.buttonStyle(.plain) }
     private func menuRow(_ title: String, subtitle: String, symbol: String) -> some View { HStack(spacing: 14) { Image(systemName: symbol).font(.title3).foregroundStyle(model.appearance.accent).frame(width: 25); VStack(alignment: .leading, spacing: 5) { Text(title).font(.subheadline.weight(.semibold)).foregroundStyle(model.appearance.ink); Text(subtitle).font(.caption).foregroundStyle(model.appearance.muted) }; Spacer(); Image(systemName: "chevron.right").font(.caption).foregroundStyle(model.appearance.muted) }.padding(18) }
@@ -38,7 +33,7 @@ struct SettingsView: View {
             Section("外观") { NavigationLink { ThemeSettingsView() } label: { HStack { Text("主题样式"); Spacer(); Text(model.theme.name).foregroundStyle(.secondary) } }; Toggle("深色模式时自动切换", isOn: $model.followSystemDark) }
             Section { Toggle("自动连播下一集", isOn: $model.autoNext); Toggle("下一集预加载", isOn: $model.preloadNext); Picker("默认播放速度", selection: $model.speed) { ForEach([Float(0.5), 0.75, 1, 1.25, 1.5, 2], id: \.self) { Text(String(format: "%g×", $0)).tag($0) } } } header: { Text("播放偏好") } footer: { Text("预加载会在当前集缓存完成后完整准备下一集，可能使用较多流量和存储空间，默认关闭。切到后台后停止播放与预加载。") }
             Section { Button { confirmCache = true } label: { HStack { Text("清理播放缓存"); Spacer(); if clearing { ProgressView() } } }.disabled(clearing) } header: { Text("存储空间") } footer: { Text("播放缓存用于加速观看，不是永久离线保存。清理缓存不会删除收藏和历史。") }
-            Section { NavigationLink("检查更新与全能签源") { UpdateView() }; NavigationLink("关于与开源许可") { AboutView() } }
+            Section("通用") { NavigationLink { UpdateView() } label: { HStack { Text("检查更新与全能签源"); Spacer(); Text(appVersionText).foregroundStyle(.secondary) } }; NavigationLink("关于红果独立版") { AboutView() } }
         }.scrollContentBackground(.hidden).appBackground(model.appearance).tint(model.appearance.accent).navigationTitle("设置").navigationBarTitleDisplayMode(.inline)
             .confirmationDialog("清理播放缓存？", isPresented: $confirmCache, titleVisibility: .visible) { Button("清理缓存", role: .destructive) { clearCache() }; Button("取消", role: .cancel) {} }
             .alert("缓存", isPresented: Binding(get: { cacheMessage != nil }, set: { if !$0 { cacheMessage = nil } })) { Button("好") { cacheMessage = nil } } message: { Text(cacheMessage ?? "") }
