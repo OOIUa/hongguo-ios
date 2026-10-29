@@ -1,18 +1,18 @@
 {
-  "version": "0.1.5",
-  "build": 6,
+  "version": "0.1.6",
+  "build": 7,
   "minimumOSVersion": "17.0",
   "releaseNotes": [
-    "启动时自动检查更新：发现新版本会弹窗显示版本与更新说明，可直接进入更新页下载并校验 IPA。",
-    "弹窗支持“稍后”与“忽略此版本”；检查失败不打扰，主题选择或播放时会等关闭后再提示。",
-    "“检查更新”页新增“启动时检查更新”开关，默认开启。"
+    "首页、发现、片单与我的顶部改为紧凑标题栏，去掉原先系统大标题留下的大片空白。",
+    "设置作为“我的”的下一级页面：检查更新与关于移入设置的“通用”分组，“我的”只保留账号、统计、播放历史与设置。",
+    "移除“我的”页面底部说明小字，界面更整洁；“播放历史”改为直接切换到片单标签。"
   ],
-  "publishedAt": "2026-10-29T14:08:40Z",
-  "downloadURL": "https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.5/Hongguo-iOS-0.1.5-unsigned.ipa",
-  "sha256": "58f15d33fd541623b81c81ec99f56b51236e8abd04d912d8e298bab98cc1047d",
-  "size": 1231048,
+  "publishedAt": "2026-10-29T14:57:22Z",
+  "downloadURL": "https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.6/Hongguo-iOS-0.1.6-unsigned.ipa",
+  "sha256": "de9af7475bad62f4592a212533c6cfbb56d827f53d7b75f09ff6e9aba76b7c5d",
+  "size": 1242455,
   "mirrors": {
-    "gh-proxy": "https://gh-proxy.com/https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.5/Hongguo-iOS-0.1.5-unsigned.ipa",
-    "ghfast": "https://ghfast.top/https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.5/Hongguo-iOS-0.1.5-unsigned.ipa"
+    "gh-proxy": "https://gh-proxy.com/https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.6/Hongguo-iOS-0.1.6-unsigned.ipa",
+    "ghfast": "https://ghfast.top/https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.6/Hongguo-iOS-0.1.6-unsigned.ipa"
   }
 }
