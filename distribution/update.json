@@ -1,18 +1,19 @@
 {
-  "version": "0.1.7",
-  "build": 8,
+  "version": "0.1.8",
+  "build": 9,
   "minimumOSVersion": "17.0",
   "releaseNotes": [
-    "红果账号新增扫码登录：显示官网登录二维码与倒计时，在红果 App 扫码确认后自动完成登录；二维码可保存或分享到另一台设备。",
-    "新增手机号登录：输入手机号获取短信验证码即可登录，验证码只提交一次，带重发倒计时。",
-    "两种方式登录后与官网登录相同，会自动连接云账号并读取账号片单；若官网要求额外验证，请改用扫码登录。"
+    "登录红果账号后，「我的」顶部账号卡片显示红果昵称、头像和连接状态，账号页同步显示头像；没有头像或加载失败时保留默认图标。",
+    "设置及其子页面（主题、检查更新、关于）和账号页改为全屏二级页面，不再显示底部标签栏，返回后恢复。",
+    "「我的」页的播放历史、设置等入口，以及片单列表和热度榜行，整行都可点击，点右侧空白处也能进入。",
+    "头像仅接受 https 地址，随账号加密保存在本机，退出或登录过期时一并清除。"
   ],
-  "publishedAt": "2026-10-29T15:50:00Z",
-  "downloadURL": "https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.7/Hongguo-iOS-0.1.7-unsigned.ipa",
-  "sha256": "7bce62a032e48ec003b3182c40d9eb6dfbc90234e48a72aabdca2ccf827f2bfd",
-  "size": 1305180,
+  "publishedAt": "2026-10-29T18:03:06Z",
+  "downloadURL": "https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.8/Hongguo-iOS-0.1.8-unsigned.ipa",
+  "sha256": "0562ff005c21a4668423263f2d72c63f42a6634838b94caec41a97292c857f68",
+  "size": 1322485,
   "mirrors": {
-    "gh-proxy": "https://gh-proxy.com/https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.7/Hongguo-iOS-0.1.7-unsigned.ipa",
-    "ghfast": "https://ghfast.top/https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.7/Hongguo-iOS-0.1.7-unsigned.ipa"
+    "gh-proxy": "https://gh-proxy.com/https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.8/Hongguo-iOS-0.1.8-unsigned.ipa",
+    "ghfast": "https://ghfast.top/https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.8/Hongguo-iOS-0.1.8-unsigned.ipa"
   }
 }
