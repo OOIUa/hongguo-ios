@@ -38,7 +38,7 @@ struct LibraryView: View {
                 HStack(spacing: 13) {
                     PosterView(drama: entry.drama).frame(width: 65)
                     VStack(alignment: .leading, spacing: 8) { Text(entry.drama.title).font(.subheadline.weight(.semibold)).foregroundStyle(model.appearance.ink).lineLimit(2); Text(entry.episodeIndex > 0 ? "看到第 \(entry.episodeIndex) 集 · \(timeLabel(entry.position))" : "还未开始观看").font(.caption).foregroundStyle(model.appearance.muted); Label(entry.episodeIndex > 0 ? "继续观看" : "开始观看", systemImage: "play.fill").font(.caption.weight(.semibold)).foregroundStyle(model.appearance.accent) }.frame(maxWidth: .infinity, alignment: .leading)
-                }
+                }.contentShape(Rectangle())
             }.buttonStyle(.plain)
             if editing { Button(role: .destructive) { if favorites { library.removeFavorite(id: entry.id) } else { library.removeHistory(id: entry.id) } } label: { Image(systemName: "minus.circle.fill").font(.title3).frame(width: 44, height: 44) }.accessibilityLabel("移除 \(entry.drama.title)") }
         }.padding(12).background(model.appearance.surface, in: RoundedRectangle(cornerRadius: 17))

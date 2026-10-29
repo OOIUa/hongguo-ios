@@ -185,13 +185,16 @@ final class AccountService: ObservableObject {
         let ticket = generation
         busy = true; message = nil; state = "正在验证账号"
         var websiteVerified = false
-        var websiteAvatar: String?
+        var website: (avatar: String?, name: String?) = (nil, nil)
         defer { if ticket == generation { busy = false } }
         do {
             if candidate.source == "WEBSITE" {
-                websiteAvatar = try await validateWebsite(candidate)
+                website = try await validateWebsite(candidate)
                 guard ticket == generation else { return }
                 websiteVerified = true
+                // Shown on 我的 even if the cloud account cannot connect yet; the app profile overrides below.
+                if nickname.isEmpty, let name = website.name { nickname = name }
+                if avatarURL.isEmpty, let avatar = website.avatar { avatarURL = avatar }
                 state = "官网已登录，正在连接云账号"
             }
             if ProtocolJSON.identifier(candidate.deviceID) == nil || ProtocolJSON.identifier(candidate.installID) == nil {
@@ -214,8 +217,8 @@ final class AccountService: ObservableObject {
                 expire(); message = "账号身份发生变化，请重新登录后再读取云片单。"; return
             }
             profileID = rawID; nickname = ProtocolJSON.text(data["user_name"])
-            if nickname.isEmpty { nickname = "红果用户" }
-            avatarURL = AccountRules.avatarURL(data) ?? websiteAvatar ?? ""
+            if nickname.isEmpty { nickname = website.name ?? "红果用户" }
+            avatarURL = AccountRules.avatarURL(data) ?? website.avatar ?? ""
             credentials = candidate
             try persist()
             authenticated = true; state = "云账号已连接"
@@ -377,8 +380,8 @@ final class AccountService: ObservableObject {
         }
     }
 
-    /// Returns the website profile's avatar, used when the app profile has none.
-    private func validateWebsite(_ candidate: AccountCredentials) async throws -> String? {
+    /// Returns the website profile's avatar and name, used when the app profile has none.
+    private func validateWebsite(_ candidate: AccountCredentials) async throws -> (avatar: String?, name: String?) {
         let ticket = generation
         var components = URLComponents(url: Self.website.appendingPathComponent("passport/account/info/v2/"), resolvingAgainstBaseURL: false)!
         components.queryItems = ["aid":"513755","passport_jssdk_version":"3.4.10","passport_jssdk_type":"normal","account_sdk_source":"web","is_from_ttaccountsdk":"1","language":"zh"].sorted { $0.key < $1.key }.map { URLQueryItem(name: $0.key, value: $0.value) }
@@ -397,7 +400,7 @@ final class AccountService: ObservableObject {
         let code = ProtocolJSON.integer(data["error_code"])
         guard ProtocolJSON.text(reply["message"]) == "success" else { throw AccountFailure(expired: [13,1003].contains(code), code: code) }
         guard AccountRules.websiteAuthenticated(reply) else { throw HGError.message("官网尚未确认登录，请先在官方页面完成验证") }
-        return AccountRules.avatarURL(data)
+        return (AccountRules.avatarURL(data), AccountRules.displayName(data))
     }
 
     private func appJSON(_ candidate: AccountCredentials, path: String, params: [String:String] = [:], body: Data? = nil) async throws -> ([String:Any], HTTPURLResponse) {

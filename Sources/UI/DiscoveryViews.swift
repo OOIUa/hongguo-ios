@@ -89,7 +89,7 @@ struct HomeView: View {
         VStack(alignment: .leading, spacing: 13) {
             SectionHeading(title: "热度榜", subtitle: "大家都在追")
             ForEach(Array(loader.dramas.prefix(3).enumerated()), id: \.element.id) { index, drama in
-                NavigationLink { DetailView(drama: drama) } label: { HStack(spacing: 12) { Text("\(index + 1)").font(.title2.bold().italic()).foregroundStyle(model.appearance.accent).frame(width: 24); Text(drama.title).font(.subheadline.weight(.medium)).foregroundStyle(model.appearance.ink).lineLimit(1); Spacer(); Image(systemName: "chevron.right").font(.caption).foregroundStyle(model.appearance.muted) }.frame(minHeight: 38) }.buttonStyle(.plain)
+                NavigationLink { DetailView(drama: drama) } label: { HStack(spacing: 12) { Text("\(index + 1)").font(.title2.bold().italic()).foregroundStyle(model.appearance.accent).frame(width: 24); Text(drama.title).font(.subheadline.weight(.medium)).foregroundStyle(model.appearance.ink).lineLimit(1); Spacer(); Image(systemName: "chevron.right").font(.caption).foregroundStyle(model.appearance.muted) }.frame(minHeight: 38).contentShape(Rectangle()) }.buttonStyle(.plain)
             }
         }.padding(16).background(model.appearance.surface, in: RoundedRectangle(cornerRadius: 18))
     }

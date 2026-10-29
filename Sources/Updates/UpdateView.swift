@@ -78,7 +78,7 @@ struct UpdateView: View {
             }
         }
         .scrollContentBackground(.hidden).appBackground(model.appearance).tint(model.appearance.accent)
-        .navigationTitle("检查更新").navigationBarTitleDisplayMode(.inline)
+        .navigationTitle("检查更新").navigationBarTitleDisplayMode(.inline).secondaryPage()
         .sheet(item: $sharing) { UpdateShareSheet(file: $0.file) }
         .alert("软件源", isPresented: Binding(get: { copyMessage != nil }, set: { if !$0 { copyMessage = nil } })) {
             Button("好") { copyMessage = nil }

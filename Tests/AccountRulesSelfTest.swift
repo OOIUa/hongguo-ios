@@ -32,6 +32,9 @@ struct AccountRulesSelfTest {
         try check(AccountRules.avatarURL(["avatar_url":"https://user@p3.example/a.jpeg"]) == nil, "avatar-userinfo-rejected")
         try check(AccountRules.avatarURL(["avatar_url":"https://p3.example/a b.jpeg"]) == nil && AccountRules.avatarURL(["avatar_url":true]) == nil, "avatar-malformed")
         try check(AccountRules.avatarURL(["user_name":"红果用户"]) == nil, "avatar-missing")
-        print("PASS account identity, website authentication, cookie scope, and avatar URLs: 26 cases")
+        try check(AccountRules.displayName(["user":["screen_name":"  果果  "]]) == "果果", "name-trimmed")
+        try check(AccountRules.displayName(["name":"a\u{0}b", "user_info":["nickname":"备用"]]) == "备用", "name-control-skipped")
+        try check(AccountRules.displayName(["screen_name":"", "name":123]) == nil, "name-missing")
+        print("PASS account identity, website authentication, cookie scope, avatar URLs and names: 29 cases")
     }
 }

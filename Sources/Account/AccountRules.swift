@@ -36,6 +36,18 @@ enum AccountRules {
         }
         return nil
     }
+    /// Display name from a website profile reply (`screen_name` and friends), trimmed and bounded.
+    static func displayName(_ data: [String:Any]) -> String? {
+        let nodes = [data, ProtocolJSON.dictionary(data["user"]), ProtocolJSON.dictionary(data["user_info"])]
+        for node in nodes {
+            for key in ["screen_name", "nickname", "user_name", "name"] {
+                guard let raw = node[key] as? String else { continue }
+                let value = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !value.isEmpty, value.count <= 64, !value.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) { return value }
+            }
+        }
+        return nil
+    }
     static func safeImageURL(_ raw: Any?) -> String? {
         guard var value = raw as? String, value.count <= 2048,
               !value.unicodeScalars.contains(where: { CharacterSet.whitespacesAndNewlines.union(.controlCharacters).contains($0) }) else { return nil }

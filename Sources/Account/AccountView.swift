@@ -90,7 +90,7 @@ struct AccountView: View {
                 Text("登录态仅加密保存在这台设备。退出账号不会删除本机收藏与历史，也不会操作官方账号的数据。")
             }
         }
-        .navigationTitle("账号与云片单").navigationBarTitleDisplayMode(.inline)
+        .navigationTitle("账号与云片单").navigationBarTitleDisplayMode(.inline).secondaryPage()
         .sheet(isPresented: $showLogin) { OfficialLoginSheet { cookie in
             showLogin = false
             Task { await account.importCookie(cookie) }
