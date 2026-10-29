@@ -1,18 +1,18 @@
 {
-  "version": "0.1.6",
-  "build": 7,
+  "version": "0.1.7",
+  "build": 8,
   "minimumOSVersion": "17.0",
   "releaseNotes": [
-    "首页、发现、片单与我的顶部改为紧凑标题栏，去掉原先系统大标题留下的大片空白。",
-    "设置作为“我的”的下一级页面：检查更新与关于移入设置的“通用”分组，“我的”只保留账号、统计、播放历史与设置。",
-    "移除“我的”页面底部说明小字，界面更整洁；“播放历史”改为直接切换到片单标签。"
+    "红果账号新增扫码登录：显示官网登录二维码与倒计时，在红果 App 扫码确认后自动完成登录；二维码可保存或分享到另一台设备。",
+    "新增手机号登录：输入手机号获取短信验证码即可登录，验证码只提交一次，带重发倒计时。",
+    "两种方式登录后与官网登录相同，会自动连接云账号并读取账号片单；若官网要求额外验证，请改用扫码登录。"
   ],
-  "publishedAt": "2026-10-29T14:57:22Z",
-  "downloadURL": "https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.6/Hongguo-iOS-0.1.6-unsigned.ipa",
-  "sha256": "de9af7475bad62f4592a212533c6cfbb56d827f53d7b75f09ff6e9aba76b7c5d",
-  "size": 1242455,
+  "publishedAt": "2026-10-29T15:50:00Z",
+  "downloadURL": "https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.7/Hongguo-iOS-0.1.7-unsigned.ipa",
+  "sha256": "7bce62a032e48ec003b3182c40d9eb6dfbc90234e48a72aabdca2ccf827f2bfd",
+  "size": 1305180,
   "mirrors": {
-    "gh-proxy": "https://gh-proxy.com/https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.6/Hongguo-iOS-0.1.6-unsigned.ipa",
-    "ghfast": "https://ghfast.top/https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.6/Hongguo-iOS-0.1.6-unsigned.ipa"
+    "gh-proxy": "https://gh-proxy.com/https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.7/Hongguo-iOS-0.1.7-unsigned.ipa",
+    "ghfast": "https://ghfast.top/https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.7/Hongguo-iOS-0.1.7-unsigned.ipa"
   }
 }
