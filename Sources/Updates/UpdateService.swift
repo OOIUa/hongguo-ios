@@ -9,9 +9,13 @@ final class UpdateService: ObservableObject {
     @Published var route: UpdateRoute {
         didSet { UserDefaults.standard.set(route.rawValue, forKey: "updates.route") }
     }
+    @Published var checksOnLaunch: Bool {
+        didSet { UserDefaults.standard.set(checksOnLaunch, forKey: "updates.checkOnLaunch") }
+    }
     @Published private(set) var phase: Phase = .idle
     @Published private(set) var manifest: UpdateManifest?
-    @Published private(set) var message = "点按“检查更新”获取最新版本。"
+    @Published private(set) var message = UpdateService.idleMessage
+    private static let idleMessage = "点按“检查更新”获取最新版本。"
     @Published private(set) var progress: Double = 0
     @Published private(set) var receivedBytes: Int64 = 0
     @Published private(set) var verifiedFile: URL?
@@ -35,6 +39,7 @@ final class UpdateService: ObservableObject {
         let version = ProcessInfo.processInfo.operatingSystemVersion
         systemVersion = "\(version.majorVersion).\(version.minorVersion).\(version.patchVersion)"
         route = UpdateRoute(rawValue: UserDefaults.standard.string(forKey: "updates.route") ?? "automatic") ?? .automatic
+        checksOnLaunch = UserDefaults.standard.object(forKey: "updates.checkOnLaunch") as? Bool ?? true
         directory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("HongguoUpdates-v1", isDirectory: true)
         // The updater owns this folder; partial or previous-launch downloads are never offered as verified.
         if let files = try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil) {
@@ -73,6 +78,20 @@ final class UpdateService: ObservableObject {
             self.phase = .failed; self.message = self.safeMessage(failure); self.operation = nil
         }
     }
+    /// Quiet launch check: returns a newer, installable release the user has not ignored. Failures stay silent and leave the manual page idle.
+    func checkOnLaunch() async -> UpdateManifest? {
+        guard checksOnLaunch, phase == .idle else { return nil }
+        check()
+        await operation?.value
+        guard phase == .available, let manifest else {
+            if phase == .failed { phase = .idle; manifest = nil; usedRoute = nil; message = Self.idleMessage }
+            return nil
+        }
+        return UserDefaults.standard.string(forKey: "updates.ignoredRelease") == Self.releaseKey(manifest) ? nil : manifest
+    }
+    /// Stops the launch prompt for this exact release; a manual check still offers it.
+    func ignore(_ manifest: UpdateManifest) { UserDefaults.standard.set(Self.releaseKey(manifest), forKey: "updates.ignoredRelease") }
+    private static func releaseKey(_ manifest: UpdateManifest) -> String { "\(manifest.version)+\(manifest.build)" }
     func download() {
         guard canDownload, let manifest else { return }
         discardFile()

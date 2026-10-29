@@ -23,8 +23,9 @@ struct UpdateView: View {
                     .accessibilityIdentifier("updates.status")
                 if let route = service.usedRoute { Text("本次使用：\(route.title)").font(.caption).foregroundStyle(.secondary) }
                 if service.phase == .checking { Button("取消检查", role: .cancel) { service.cancel() }.accessibilityIdentifier("updates.cancel") }
+                Toggle("启动时检查更新", isOn: $service.checksOnLaunch).accessibilityIdentifier("updates.launchCheck")
             } header: { Text("版本更新") } footer: {
-                Text("手动检查后才读取更新说明。自动线路依次尝试官方 GitHub、gh-proxy 和 ghfast；手动线路使用所选服务。")
+                Text("开启后每次启动会在后台读取更新说明，发现新版本时弹窗提示；检查失败不会打扰。自动线路依次尝试官方 GitHub、gh-proxy 和 ghfast；手动线路使用所选服务。")
             }
 
             if let manifest = service.manifest {
