@@ -80,6 +80,11 @@ final class HongguoQATests: XCTestCase {
         XCTAssertTrue(second.waitForExistence(timeout: 10))
         XCTAssertTrue(app.buttons["暂停"].waitForExistence(timeout: 90))
         capture("12-player-next")
+        app.buttons["视频画面"].swipeDown()
+        let first = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "第 1 集 / 共")).firstMatch
+        XCTAssertTrue(first.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["暂停"].waitForExistence(timeout: 90))
+        capture("12a-drag-previous")
         app.buttons["player.episodes"].tap()
         XCTAssertTrue(app.buttons["3"].waitForExistence(timeout: 5))
         capture("12b-episode-picker"); app.buttons["3"].tap()

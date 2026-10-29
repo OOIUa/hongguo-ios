@@ -36,6 +36,9 @@ final class PlayerSession: ObservableObject {
     private var prefetchStarted = false
     private var stopped = false
     private var lastSave = Date.distantPast
+    private var resumeAfterGesture = false
+    /// Set by the player screen: episode changes slide like a page instead of cutting. Cleared on stop to break the cycle.
+    var onSlide: (@MainActor (Int) -> Void)?
     private let initialPosition: Double
     private let accountToken: UUID
     var episode: Episode { detail.episodes[index] }
@@ -57,7 +60,7 @@ final class PlayerSession: ObservableObject {
         if prepared != nil { warmURL = nil; warmEpisodeID = nil }
         cancelWarm()
         releasePlayer()
-        index = target; playID = UUID()
+        index = target; playID = UUID(); resumeAfterGesture = false
         let ticket = playID
         let saved = startAt ?? (recordsLocalHistory ? app.library.progress(for: detail.drama.id).flatMap { $0.episodeID == nextEpisode.id ? $0.position : nil } : nil) ?? 0
         position = saved; duration = 0; previewPosition = saved
@@ -156,11 +159,27 @@ final class PlayerSession: ObservableObject {
         if editing { previewPosition = position; scrubbing = true }
         else { scrubbing = false; finished = false; endMessage = nil; player?.seek(to: CMTime(seconds: max(0, previewPosition), preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero); position = previewPosition; saveProgress() }
     }
-    func next() { guard index + 1 < detail.episodes.count else { endMessage = "已到最后一集"; return }; load(index: index + 1, startAt: 0) }
-    func previous() { guard index > 0 else { endMessage = "已经是第一集"; return }; load(index: index - 1, startAt: 0) }
+    func next() { guard index + 1 < detail.episodes.count else { endMessage = "已到最后一集"; return }; go(to: index + 1) }
+    func previous() { guard index > 0 else { endMessage = "已经是第一集"; return }; go(to: index - 1) }
+    /// Buttons, autoplay and the episode sheet all switch through here, so they slide like a user swipe when a screen is attached.
+    func go(to target: Int) {
+        guard detail.episodes.indices.contains(target), target != index, !stopped else { return }
+        if let onSlide { onSlide(target) } else { load(index: target, startAt: 0) }
+    }
+    /// A page drag or slide pauses the picture without changing the user's pause intent; coming back to the same episode resumes it.
+    func holdForGesture() {
+        endHold()
+        if !resumeAfterGesture { resumeAfterGesture = isPlaying || (player?.rate ?? 0) > 0 }
+        player?.pause()
+    }
+    func releaseGesture() {
+        let resume = resumeAfterGesture; resumeAfterGesture = false
+        guard resume, !stopped, !finished, error == nil, let player else { return }
+        endMessage = nil; player.playImmediately(atRate: app.speed)
+    }
     func retry() { load(index: index, startAt: position) }
     func suspend() {
-        pause(); saveProgress(flush: true); cancelWarm()
+        resumeAfterGesture = false; pause(); saveProgress(flush: true); cancelWarm()
         if preparing { requestTask?.cancel(); playID = UUID(); preparing = false; error = "播放准备已暂停，回到前台后可重试。" }
     }
     func preferencesChanged() { if !app.preloadNext { cancelWarm(); prefetchStarted = false } }
@@ -214,5 +233,5 @@ final class PlayerSession: ObservableObject {
         if let url = currentURL { Task { await MediaPreparer.shared.unpin(url) } }; currentURL = nil
     }
 
-    func stop() { guard !stopped else { return }; saveProgress(flush: true); stopped = true; requestTask?.cancel(); requestTask = nil; cancelWarm(); playID = UUID(); releasePlayer(); try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation) }
+    func stop() { guard !stopped else { return }; saveProgress(flush: true); stopped = true; onSlide = nil; resumeAfterGesture = false; requestTask?.cancel(); requestTask = nil; cancelWarm(); playID = UUID(); releasePlayer(); try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation) }
 }
