@@ -4,6 +4,7 @@ import WebKit
 
 struct AccountView: View {
     @StateObject private var account = AccountService.shared
+    @StateObject private var webLogin = WebLoginModel()
     @State private var showLogin = false
     @State private var showImport = false
     @State private var showLogout = false
@@ -21,13 +22,18 @@ struct AccountView: View {
                     if account.busy { ProgressView() }
                 }.padding(.vertical, 8)
                 if let message = account.message { Text(message).font(.footnote).foregroundStyle(.secondary) }
-                Button("在本机打开官网登录", systemImage: "globe") { showLogin = true }.disabled(account.busy)
+                if !account.authenticated {
+                    Button("在本机打开官网登录", systemImage: "globe") { webLogin.cancel(); showLogin = true }.disabled(account.busy)
+                }
                 if account.hasCredentials {
                     Button("重新验证账号", systemImage: "arrow.clockwise") { Task { await account.verify() } }.disabled(account.busy)
                     Button("退出账号", systemImage: "rectangle.portrait.and.arrow.right", role: .destructive) { showLogout = true }
                 }
             } footer: {
-                Text("请在官方页面自行完成短信、扫码或平台验证。官网会话与手机云账号分别验证，只有云账号连接后才能读取账号片单。本机收藏和历史始终独立保存。")
+                Text("可在官网、扫码或手机号中任选一种登录。官网会话与手机云账号分别验证，只有云账号连接后才能读取账号片单。本机收藏和历史始终独立保存。")
+            }
+            if !account.authenticated {
+                AccountLoginMethods(login: webLogin, disabled: account.busy) { cookie in Task { await account.importCookie(cookie) } }
             }
             if account.authenticated {
                 Section {
@@ -84,6 +90,7 @@ struct AccountView: View {
             Button("退出并清理本机账号缓存", role: .destructive) { account.logout() }
         }
         .task { if account.hasCredentials && !account.authenticated { await account.verify() } }
+        .onDisappear { webLogin.cancel() }
         .refreshable { if account.authenticated { await account.refresh() } else { await account.verify() } }
     }
     private func empty(_ text: String) -> some View { Text(text).foregroundStyle(.secondary).frame(maxWidth: .infinity).padding(.vertical, 24) }
@@ -128,6 +135,177 @@ private struct CookieImportSheet: View {
             }.navigationTitle("导入登录态").navigationBarTitleDisplayMode(.inline)
                 .toolbar { ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } } }
         }
+    }
+}
+
+/// QR and SMS login state. One `WebLogin` per attempt; switching methods or leaving the page cancels it.
+@MainActor
+final class WebLoginModel: ObservableObject {
+    enum PhoneStep { case idle, codeSent }
+    @Published private(set) var qrImage: UIImage?
+    @Published private(set) var qrRemaining = 0
+    @Published private(set) var phoneStep = PhoneStep.idle
+    @Published private(set) var phoneMasked = ""
+    @Published private(set) var smsRemaining = 0
+    @Published private(set) var busy = false
+    @Published private(set) var message: String?
+    private var login: WebLogin?
+    private var task: Task<Void, Never>?
+    private var countdown: Task<Void, Never>?
+
+    var active: Bool { busy || qrImage != nil || phoneStep == .codeSent }
+
+    func cancel() {
+        task?.cancel(); countdown?.cancel(); task = nil; countdown = nil
+        login?.cancel(); login = nil
+        qrImage = nil; qrRemaining = 0; phoneStep = .idle; phoneMasked = ""; smsRemaining = 0; busy = false; message = nil
+    }
+    func startQR(onSuccess: @escaping (String) -> Void) {
+        cancel()
+        let session = WebLogin(); login = session
+        busy = true
+        task = Task { [weak self] in
+            do {
+                let qr = try await session.qr()
+                guard let self, !Task.isCancelled else { return }
+                self.qrImage = UIImage(data: qr.image); self.qrRemaining = qr.lifetime; self.busy = false
+                guard self.qrImage != nil else { throw HGError.message("登录二维码格式无效") }
+                var tick = 0
+                while self.qrRemaining > 0 {
+                    try await Task.sleep(nanoseconds: 1_000_000_000)
+                    self.qrRemaining -= 1; tick += 1
+                    // Poll every two seconds, like the Android client.
+                    guard tick % 2 == 0 else { continue }
+                    if try await session.poll() {
+                        self.busy = true; self.message = "已确认扫码，正在验证官网登录…"
+                        let cookie = try await session.credentials()
+                        guard !Task.isCancelled else { return }
+                        self.finish(cookie, onSuccess); return
+                    }
+                }
+                self.message = "二维码已过期，请刷新"
+            } catch is CancellationError {
+            } catch {
+                guard let self, !Task.isCancelled else { return }
+                self.busy = false; self.qrRemaining = 0; self.message = Self.describe(error)
+            }
+        }
+    }
+    func sendSMS(_ phone: String) {
+        guard !busy else { return }
+        let session = login ?? WebLogin(); login = session
+        busy = true; message = nil
+        task = Task { [weak self] in
+            do {
+                let sent = try await session.send(phone)
+                guard let self, !Task.isCancelled else { return }
+                self.busy = false; self.phoneStep = .codeSent; self.phoneMasked = sent.masked
+                self.startSMSCountdown(sent.retry)
+            } catch is CancellationError {
+            } catch {
+                guard let self, !Task.isCancelled else { return }
+                self.busy = false; self.message = Self.describe(error)
+            }
+        }
+    }
+    func verifySMS(_ code: String, onSuccess: @escaping (String) -> Void) {
+        guard !busy, let session = login else { return }
+        busy = true; message = nil
+        task = Task { [weak self] in
+            do {
+                let cookie = try await session.verify(code)
+                guard let self, !Task.isCancelled else { return }
+                self.finish(cookie, onSuccess)
+            } catch is CancellationError {
+            } catch {
+                guard let self, !Task.isCancelled else { return }
+                // The code was consumed; the user must request a new one.
+                self.busy = false; self.phoneStep = .idle; self.message = Self.describe(error)
+            }
+        }
+    }
+    private func startSMSCountdown(_ seconds: Int) {
+        countdown?.cancel(); smsRemaining = seconds
+        countdown = Task { [weak self] in
+            while let self, self.smsRemaining > 0 {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                guard !Task.isCancelled else { return }
+                self.smsRemaining -= 1
+            }
+        }
+    }
+    private func finish(_ cookie: String, _ onSuccess: (String) -> Void) {
+        let message = "官网已登录，正在连接云账号…"
+        cancel(); self.message = message
+        onSuccess(cookie)
+    }
+    private static func describe(_ error: Error) -> String {
+        if let error = error as? HGError { return error.localizedDescription }
+        return "网络请求未完成，请检查网络后重试。"
+    }
+}
+
+private struct AccountLoginMethods: View {
+    @ObservedObject var login: WebLoginModel
+    let disabled: Bool
+    let completed: (String) -> Void
+    @State private var sms = false
+    // Phone number and one-time code stay in view memory only.
+    @State private var phone = ""
+    @State private var code = ""
+
+    var body: some View {
+        Section {
+            Picker("登录方式", selection: $sms) { Text("扫码登录").tag(false); Text("手机号登录").tag(true) }
+                .pickerStyle(.segmented).onChange(of: sms) { _, _ in login.cancel(); code = "" }
+            if sms { smsForm } else { qrForm }
+            if let message = login.message { Text(message).font(.footnote).foregroundStyle(.orange) }
+        } header: { Text("其他登录方式") } footer: {
+            Text(sms ? "验证码仅提交给红果官网，提交一次后即失效；若提示需要额外验证，请改用扫码登录。"
+                 : "二维码可保存或发送到另一台设备显示，再用红果 App 扫码确认。只有一台手机时也可用官网或手机号登录。")
+        }.disabled(disabled)
+    }
+
+    @ViewBuilder private var qrForm: some View {
+        if let image = login.qrImage {
+            VStack(spacing: 10) {
+                Image(uiImage: image).interpolation(.none).resizable().scaledToFit().frame(width: 210, height: 210)
+                    .opacity(login.qrRemaining > 0 ? 1 : 0.3).accessibilityLabel("红果账号登录二维码")
+                Text(login.qrRemaining > 0 ? "用红果 App 扫码并确认登录 · \(login.qrRemaining) 秒" : "二维码已过期，请刷新")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }.frame(maxWidth: .infinity).padding(.vertical, 6)
+            ShareLink(item: Image(uiImage: image), preview: SharePreview("红果登录二维码", image: Image(uiImage: image))) {
+                Label("保存或分享二维码", systemImage: "square.and.arrow.up")
+            }
+        }
+        HStack {
+            Button(login.qrImage == nil ? "获取二维码" : "刷新二维码", systemImage: "qrcode") { login.startQR(onSuccess: completed) }
+                .disabled(login.busy && login.qrImage == nil)
+            Spacer()
+            if login.busy && login.qrImage == nil { ProgressView() }
+        }
+        if login.active { Button("取消登录", role: .cancel) { login.cancel() } }
+    }
+
+    @ViewBuilder private var smsForm: some View {
+        TextField("中国大陆手机号", text: $phone).keyboardType(.phonePad).textContentType(.telephoneNumber)
+            .disabled(login.busy || login.phoneStep == .codeSent)
+            .onChange(of: phone) { _, value in let digits = String(value.filter(\.isNumber).prefix(11)); if digits != value { phone = digits } }
+        if login.phoneStep == .codeSent {
+            Text("验证码已发送至 \(login.phoneMasked)").font(.footnote).foregroundStyle(.secondary)
+            TextField("短信验证码", text: $code).keyboardType(.numberPad).textContentType(.oneTimeCode)
+                .onChange(of: code) { _, value in let digits = String(value.filter(\.isNumber).prefix(8)); if digits != value { code = digits } }
+            Button("验证并登录") { login.verifySMS(code, onSuccess: completed); code = "" }
+                .disabled(login.busy || code.count < 4)
+        }
+        HStack {
+            Button(login.smsRemaining > 0 ? "\(login.smsRemaining) 秒后重新发送" : login.phoneStep == .codeSent ? "重新发送验证码" : "获取验证码") {
+                login.sendSMS(phone)
+            }.disabled(login.busy || phone.count != 11 || login.smsRemaining > 0)
+            Spacer()
+            if login.busy { ProgressView() }
+        }
+        if login.active { Button("取消或更换手机号", role: .cancel) { login.cancel(); code = "" } }
     }
 }
 

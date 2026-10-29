@@ -5,3 +5,5 @@ cd "$TASK_ROOT"
 mkdir -p build/tests
 /usr/bin/swiftc Sources/Core/Models.swift Sources/Networking/ProtocolJSON.swift Sources/Account/AccountRules.swift Tests/AccountRulesSelfTest.swift -o build/tests/account-rules
 build/tests/account-rules
+/usr/bin/swiftc Sources/Core/Models.swift Sources/Networking/ProtocolJSON.swift Sources/Account/AccountRules.swift Sources/Account/WebLogin.swift Tests/WebLoginSelfTest.swift -o build/tests/web-login
+build/tests/web-login

@@ -16,4 +16,5 @@
  <key>UISupportedInterfaceOrientations</key><array><string>UIInterfaceOrientationPortrait</string><string>UIInterfaceOrientationLandscapeLeft</string><string>UIInterfaceOrientationLandscapeRight</string></array>
  <key>UIRequiresFullScreen</key><true/>
  <key>NSAppTransportSecurity</key><dict><key>NSAllowsArbitraryLoads</key><false/></dict>
+ <key>NSPhotoLibraryAddUsageDescription</key><string>用于把红果账号登录二维码保存到相册，便于在另一台设备上扫码。</string>
 </dict></plist>
