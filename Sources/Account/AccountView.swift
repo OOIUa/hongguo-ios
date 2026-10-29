@@ -2,6 +2,19 @@
 import SwiftUI
 import WebKit
 
+/// Profile avatar; the placeholder stays while loading, without an avatar, or when the image fails.
+struct AccountAvatar<Placeholder: View>: View {
+    let url: String
+    let size: CGFloat
+    @ViewBuilder var placeholder: Placeholder
+    var body: some View {
+        AsyncImage(url: URL(string: url)) { phase in
+            if let image = phase.image { image.resizable().scaledToFill().frame(width: size, height: size).clipShape(Circle()) }
+            else { placeholder }
+        }.accessibilityHidden(true)
+    }
+}
+
 struct AccountView: View {
     @StateObject private var account = AccountService.shared
     @StateObject private var webLogin = WebLoginModel()
@@ -13,7 +26,7 @@ struct AccountView: View {
         List {
             Section {
                 HStack(spacing: 14) {
-                    Image(systemName: "person.crop.circle.fill").font(.system(size: 48)).foregroundStyle(.orange)
+                    AccountAvatar(url: account.avatarURL, size: 52) { Image(systemName: "person.crop.circle.fill").font(.system(size: 48)).foregroundStyle(.orange) }
                     VStack(alignment: .leading, spacing: 5) {
                         Text(account.nickname.isEmpty ? "个人红果账号" : account.nickname).font(.headline)
                         Text(account.state).font(.subheadline).foregroundStyle(.secondary)

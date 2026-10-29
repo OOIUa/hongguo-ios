@@ -22,6 +22,28 @@ enum AccountRules {
             }
         }
     }
+    /// First usable avatar in a profile reply: a plain URL string or a `{url_list: [...]}` image object.
+    /// Only https (upgraded from http or scheme-relative) so ATS never blocks it and nothing else is fetched.
+    static func avatarURL(_ data: [String:Any]) -> String? {
+        let nodes = [data, ProtocolJSON.dictionary(data["user"]), ProtocolJSON.dictionary(data["user_info"])]
+        let keys = ["avatar_url", "avatar_large_url", "avatar_large", "avatar_medium", "avatar_thumb", "avatar"]
+        for node in nodes {
+            for key in keys {
+                let value = node[key]
+                let candidates: [Any] = (value as? String).map { [$0] } ?? ProtocolJSON.array(ProtocolJSON.dictionary(value)["url_list"])
+                for candidate in candidates { if let url = safeImageURL(candidate) { return url } }
+            }
+        }
+        return nil
+    }
+    static func safeImageURL(_ raw: Any?) -> String? {
+        guard var value = raw as? String, value.count <= 2048,
+              !value.unicodeScalars.contains(where: { CharacterSet.whitespacesAndNewlines.union(.controlCharacters).contains($0) }) else { return nil }
+        if value.hasPrefix("//") { value = "https:" + value }
+        else if value.lowercased().hasPrefix("http://") { value = "https://" + value.dropFirst(7) }
+        guard let url = URL(string: value), url.scheme?.lowercased() == "https", let host = url.host, !host.isEmpty, url.user == nil else { return nil }
+        return url.absoluteString
+    }
     static func domainMatches(cookieDomain: String, targetHost: String) -> Bool {
         let domain = cookieDomain.trimmingCharacters(in: CharacterSet(charactersIn: ".")).lowercased()
         let target = targetHost.lowercased()

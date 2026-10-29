@@ -3,13 +3,12 @@ import SwiftUI
 struct MyView: View {
     @EnvironmentObject private var model: AppModel
     @EnvironmentObject private var library: LibraryStore
+    @ObservedObject private var account = AccountService.shared
     var body: some View {
         ScrollView {
             VStack(spacing: 20) {
                 TabHeader(title: "我的") { NavigationLink { SettingsView() } label: { HeaderIcon(symbol: "gearshape") }.buttonStyle(.plain).accessibilityLabel("设置").accessibilityIdentifier("my.settings") }
-                NavigationLink { AccountView() } label: {
-                    HStack(spacing: 15) { Image(systemName: "person.crop.circle").font(.system(size: 43, weight: .light)).foregroundStyle(model.appearance.accent).frame(width: 62, height: 62).background(model.appearance.soft, in: RoundedRectangle(cornerRadius: 20)); VStack(alignment: .leading, spacing: 7) { Text("红果账号").font(.title3.bold()).foregroundStyle(model.appearance.ink); Text("登录方式、云片单与账号管理").font(.caption).foregroundStyle(model.appearance.muted) }; Spacer(); Image(systemName: "chevron.right").font(.caption).foregroundStyle(model.appearance.muted) }.padding(19).background(model.appearance.surface, in: RoundedRectangle(cornerRadius: 22))
-                }.buttonStyle(.plain)
+                NavigationLink { AccountView() } label: { accountCard }.buttonStyle(.plain)
                 HStack(spacing: 14) { stat("本机收藏", count: library.favorites.count, symbol: "star"); stat("本机看过", count: library.history.count, symbol: "clock") }
                 VStack(spacing: 0) {
                     Button { model.tab = 2 } label: { menuRow("播放历史", subtitle: "继续上次看到的地方", symbol: "clock.arrow.circlepath") }
@@ -18,6 +17,14 @@ struct MyView: View {
                 }.background(model.appearance.surface, in: RoundedRectangle(cornerRadius: 21)).buttonStyle(.plain)
             }.padding(.horizontal, 20).padding(.top, 8).padding(.bottom, 20)
         }.navigationTitle("我的").appBackground(model.appearance).tabRoot(model.appearance)
+    }
+    private var accountCard: some View {
+        let signedIn = !account.nickname.isEmpty
+        return HStack(spacing: 15) {
+            AccountAvatar(url: account.avatarURL, size: 62) { Image(systemName: "person.crop.circle").font(.system(size: 43, weight: .light)).foregroundStyle(model.appearance.accent).frame(width: 62, height: 62).background(model.appearance.soft, in: RoundedRectangle(cornerRadius: 20)) }
+            VStack(alignment: .leading, spacing: 7) { Text(signedIn ? account.nickname : "红果账号").font(.title3.bold()).foregroundStyle(model.appearance.ink).lineLimit(1); Text(signedIn ? account.state : "登录方式、云片单与账号管理").font(.caption).foregroundStyle(model.appearance.muted) }
+            Spacer(); Image(systemName: "chevron.right").font(.caption).foregroundStyle(model.appearance.muted)
+        }.padding(19).background(model.appearance.surface, in: RoundedRectangle(cornerRadius: 22))
     }
     private func stat(_ title: String, count: Int, symbol: String) -> some View { Button { model.tab = 2 } label: { VStack(alignment: .leading, spacing: 14) { HStack { Text(title).font(.caption); Spacer(); Image(systemName: symbol) }.foregroundStyle(model.appearance.muted); Text("\(count)").font(.system(size: 31, weight: .bold, design: .rounded)).foregroundStyle(model.appearance.ink) }.padding(19).frame(maxWidth: .infinity).background(model.appearance.surface, in: RoundedRectangle(cornerRadius: 20)) }.buttonStyle(.plain) }
     private func menuRow(_ title: String, subtitle: String, symbol: String) -> some View { HStack(spacing: 14) { Image(systemName: symbol).font(.title3).foregroundStyle(model.appearance.accent).frame(width: 25); VStack(alignment: .leading, spacing: 5) { Text(title).font(.subheadline.weight(.semibold)).foregroundStyle(model.appearance.ink); Text(subtitle).font(.caption).foregroundStyle(model.appearance.muted) }; Spacer(); Image(systemName: "chevron.right").font(.caption).foregroundStyle(model.appearance.muted) }.padding(18) }

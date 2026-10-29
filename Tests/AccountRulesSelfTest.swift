@@ -25,6 +25,13 @@ struct AccountRulesSelfTest {
         try check(!AccountRules.domainMatches(cookieDomain:"login.hongguoduanju.com",targetHost:"hongguoduanju.com"), "subdomain-cookie-stays-subdomain")
         try check(!AccountRules.domainMatches(cookieDomain:"evilhongguoduanju.com",targetHost:"hongguoduanju.com"), "suffix-confusion-rejected")
         try check(!AccountRules.domainMatches(cookieDomain:"hongguoduanju.com.evil.example",targetHost:"hongguoduanju.com"), "lookalike-host-rejected")
-        print("PASS account identity, website authentication, and cookie scope: 19 cases")
+        try check(AccountRules.avatarURL(["avatar_url":"https://p3.example/a.jpeg"]) == "https://p3.example/a.jpeg", "avatar-plain")
+        try check(AccountRules.avatarURL(["user":["avatar_thumb":["url_list":["", "http://p6.example/t.webp"]]]]) == "https://p6.example/t.webp", "avatar-url-list-upgraded")
+        try check(AccountRules.avatarURL(["user_info":["avatar":"//p9.example/x.png"]]) == "https://p9.example/x.png", "avatar-scheme-relative")
+        try check(AccountRules.avatarURL(["avatar_url":"javascript:alert(1)", "avatar":"file:///etc/passwd"]) == nil, "avatar-unsafe-scheme")
+        try check(AccountRules.avatarURL(["avatar_url":"https://user@p3.example/a.jpeg"]) == nil, "avatar-userinfo-rejected")
+        try check(AccountRules.avatarURL(["avatar_url":"https://p3.example/a b.jpeg"]) == nil && AccountRules.avatarURL(["avatar_url":true]) == nil, "avatar-malformed")
+        try check(AccountRules.avatarURL(["user_name":"红果用户"]) == nil, "avatar-missing")
+        print("PASS account identity, website authentication, cookie scope, and avatar URLs: 26 cases")
     }
 }

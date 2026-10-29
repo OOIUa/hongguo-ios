@@ -25,6 +25,7 @@ private struct AccountSnapshot: Codable {
     var credentials: AccountCredentials
     var profileID: String
     var nickname: String
+    var avatarURL: String?
     var favorites: [Drama]
     var history: [LibraryEntry]
     var reservations: [CloudReservation]
@@ -120,6 +121,7 @@ final class AccountService: ObservableObject {
     static let desktopUA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36"
     @Published private(set) var state = "未登录"
     @Published private(set) var nickname = ""
+    @Published private(set) var avatarURL = ""
     @Published private(set) var authenticated = false
     @Published private(set) var busy = false
     @Published private(set) var message: String?
@@ -149,6 +151,7 @@ final class AccountService: ObservableObject {
         do {
             if let snapshot = try AccountVault.load() {
                 credentials = snapshot.credentials; profileID = snapshot.profileID; nickname = snapshot.nickname
+                avatarURL = snapshot.avatarURL.flatMap(AccountRules.safeImageURL) ?? ""
                 favorites = snapshot.favorites; history = snapshot.history; reservations = snapshot.reservations
                 if progressUploadsEnabled { for entry in snapshot.pendingProgress ?? [] { pendingProgress[entry.drama.id] = entry } }
                 state = "登录态待验证"
@@ -171,7 +174,7 @@ final class AccountService: ObservableObject {
         AccountTransport.shared.cancelAndReset()
         cancelUploads(); pendingProgress = [:]
         generation = UUID(); authenticated = false
-        profileID = ""; nickname = ""; favorites = []; history = []; reservations = []; pendingFavorites = []
+        profileID = ""; nickname = ""; avatarURL = ""; favorites = []; history = []; reservations = []; pendingFavorites = []
         credentials = AccountCredentials(cookie: cookie, source: source, deviceID: deviceID, installID: installID)
         await verify()
     }
@@ -182,10 +185,11 @@ final class AccountService: ObservableObject {
         let ticket = generation
         busy = true; message = nil; state = "正在验证账号"
         var websiteVerified = false
+        var websiteAvatar: String?
         defer { if ticket == generation { busy = false } }
         do {
             if candidate.source == "WEBSITE" {
-                try await validateWebsite(candidate)
+                websiteAvatar = try await validateWebsite(candidate)
                 guard ticket == generation else { return }
                 websiteVerified = true
                 state = "官网已登录，正在连接云账号"
@@ -211,6 +215,7 @@ final class AccountService: ObservableObject {
             }
             profileID = rawID; nickname = ProtocolJSON.text(data["user_name"])
             if nickname.isEmpty { nickname = "红果用户" }
+            avatarURL = AccountRules.avatarURL(data) ?? websiteAvatar ?? ""
             credentials = candidate
             try persist()
             authenticated = true; state = "云账号已连接"
@@ -231,7 +236,7 @@ final class AccountService: ObservableObject {
     func logout() {
         cancelUploads(); pendingProgress = [:]
         AccountTransport.shared.cancelAndReset()
-        generation = UUID(); credentials = nil; profileID = ""; nickname = ""
+        generation = UUID(); credentials = nil; profileID = ""; nickname = ""; avatarURL = ""
         authenticated = false; busy = false; state = "未登录"
         favorites = []; history = []; reservations = []; listErrors = []; pendingFavorites = []
         do { try AccountVault.clear(); message = nil } catch { message = "账号已退出，但本机加密缓存清理失败，请重试退出。" }
@@ -372,7 +377,8 @@ final class AccountService: ObservableObject {
         }
     }
 
-    private func validateWebsite(_ candidate: AccountCredentials) async throws {
+    /// Returns the website profile's avatar, used when the app profile has none.
+    private func validateWebsite(_ candidate: AccountCredentials) async throws -> String? {
         let ticket = generation
         var components = URLComponents(url: Self.website.appendingPathComponent("passport/account/info/v2/"), resolvingAgainstBaseURL: false)!
         components.queryItems = ["aid":"513755","passport_jssdk_version":"3.4.10","passport_jssdk_type":"normal","account_sdk_source":"web","is_from_ttaccountsdk":"1","language":"zh"].sorted { $0.key < $1.key }.map { URLQueryItem(name: $0.key, value: $0.value) }
@@ -391,6 +397,7 @@ final class AccountService: ObservableObject {
         let code = ProtocolJSON.integer(data["error_code"])
         guard ProtocolJSON.text(reply["message"]) == "success" else { throw AccountFailure(expired: [13,1003].contains(code), code: code) }
         guard AccountRules.websiteAuthenticated(reply) else { throw HGError.message("官网尚未确认登录，请先在官方页面完成验证") }
+        return AccountRules.avatarURL(data)
     }
 
     private func appJSON(_ candidate: AccountCredentials, path: String, params: [String:String] = [:], body: Data? = nil) async throws -> ([String:Any], HTTPURLResponse) {
@@ -504,7 +511,7 @@ final class AccountService: ObservableObject {
     }
     private func persist() throws {
         guard let credentials else { return }
-        try AccountVault.save(AccountSnapshot(credentials: credentials, profileID: profileID, nickname: nickname, favorites: favorites, history: history, reservations: reservations, pendingProgress:Array(pendingProgress.values)))
+        try AccountVault.save(AccountSnapshot(credentials: credentials, profileID: profileID, nickname: nickname, avatarURL: avatarURL, favorites: favorites, history: history, reservations: reservations, pendingProgress:Array(pendingProgress.values)))
     }
     private func handleExpired(_ error: Error) -> Bool {
         guard let failure = error as? AccountFailure, failure.expired else { return false }
@@ -514,7 +521,7 @@ final class AccountService: ObservableObject {
         cancelUploads(); pendingProgress = [:]
         generation = UUID(); AccountTransport.shared.cancelAndReset()
         credentials = nil; authenticated = false; busy = false; state = "登录已过期"
-        nickname = ""; profileID = ""; favorites = []; history = []; reservations = []; pendingFavorites = []
+        nickname = ""; avatarURL = ""; profileID = ""; favorites = []; history = []; reservations = []; pendingFavorites = []
         message = "登录会话已失效，请重新登录。"
         try? AccountVault.clear()
     }
