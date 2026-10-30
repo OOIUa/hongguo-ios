@@ -166,14 +166,28 @@ actor DramaAPI {
 
     func track(episodeID: String) async throws -> VideoTrack {
         guard ProtocolJSON.identifier(episodeID) != nil else { throw HGError.message("分集编号无效") }
-        let identity = try await playbackIdentity()
-        let profile = identity.device
-        let query = profile.keys.sorted().map { [ $0, profile[$0]! ] } + [["_rticket",String(Int64(Date().timeIntervalSince1970 * 1000))]]
-        let url = URL(string: "https://api5-normal-sinfonlineb.fqnovel.com/novel/player/multi_video_model/v1/?" + query.map { Self.encode($0[0])+"="+Self.encode($0[1]) }.joined(separator: "&"))!
-        let biz: [String: Any] = ["detail_page_version":0,"device_level":3,"disable_digg_stat":false,"need_all_video_definition":true,
+        // device_level=3 makes the server ship some episodes' 360P–720P as undecodable bytevc2, leaving only
+        // 1080P; level 1 serves normal episodes the same ladder (synchronized from hongguoTV 0.1.12).
+        let biz: [String: Any] = ["detail_page_version":0,"device_level":1,"disable_digg_stat":false,"need_all_video_definition":true,
             "need_mp4_align":false,"use_os_player":false,"use_server_dns":false,"video_platform":1024]
         let body = try ProtocolJSON.data(["biz_param":biz,"mixed_video_id_map":["1004":[episodeID]]])
-        let response = try await request(url: url, body: body, headers: ["User-Agent":PlaybackRegistration.userAgent, "Accept":"application/json; charset=utf-8,application/x-protobuf", "Content-Type":"application/json; charset=UTF-8"])
+        let headers = ["User-Agent":PlaybackRegistration.userAgent, "Accept":"application/json; charset=utf-8,application/x-protobuf", "Content-Type":"application/json; charset=UTF-8"]
+        var identity = try await playbackIdentity()
+        var response: [String: Any] = [:]
+        for attempt in 0..<2 {
+            let data = try await fetch(url: Self.playbackURL(identity), body: body, headers: headers)
+            if !data.isEmpty {
+                do { response = try ProtocolJSON.object(data) } catch { throw HGError.message("服务数据格式发生变化，请稍后重试") }
+                break
+            }
+            // An empty reply usually means the anonymous identity was rejected: retry once with a newly
+            // registered one (synchronized from hongguo-drama 5.0). A second empty reply is reported.
+            try Task.checkCancellation()
+            guard attempt == 0, let renewed = try? await renewPlaybackIdentity(rejected: identity), renewed.deviceID != identity.deviceID else {
+                throw HGError.message("播放服务返回空响应，疑似播放设备身份被拒，请稍后重试")
+            }
+            identity = renewed
+        }
         guard ProtocolJSON.integer(response["code"] ?? response["Code"]) == 0 else { throw HGError.message("当前分集暂未提供播放信息") }
         let entry = ProtocolJSON.dictionary(ProtocolJSON.dictionary(response["data"])[episodeID])
         let model = ProtocolJSON.dictionary(entry["video_model"])
@@ -232,6 +246,20 @@ actor DramaAPI {
         registrationTask = task
         do { let identity = try await task.value; registered = identity; registrationTask = nil; registrationFailedAt = nil; return identity }
         catch { registrationTask = nil; if !(error is CancellationError) { registrationFailedAt = Date() }; throw error }
+    }
+
+    /// Replaces an identity the playback API rejected. Callers that saw the same rejection share one renewal.
+    private func renewPlaybackIdentity(rejected: RegisteredIdentity) async throws -> RegisteredIdentity {
+        if let task = registrationTask { return try await task.value }
+        if let registered, registered.deviceID != rejected.deviceID { return registered }
+        registered = nil
+        return try await playbackIdentity()
+    }
+
+    static func playbackURL(_ identity: RegisteredIdentity, rticket: Int64 = Int64(Date().timeIntervalSince1970 * 1000)) -> URL {
+        let profile = identity.device
+        let query = profile.keys.sorted().map { [ $0, profile[$0]! ] } + [["_rticket",String(rticket)]]
+        return URL(string: "https://api5-normal-sinfonlineb.fqnovel.com/novel/player/multi_video_model/v1/?" + query.map { encode($0[0])+"="+encode($0[1]) }.joined(separator: "&"))!
     }
 
     private func rank(offset: Int) async throws -> DramaPage {

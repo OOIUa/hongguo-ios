@@ -152,7 +152,7 @@ final class PlayerSession: ObservableObject {
     func toggle() { if finished { load(index: index, startAt: 0) } else if isPlaying || (player?.rate ?? 0) > 0 { pause() } else { endHold(); endMessage = nil; currentStream?.resume(); player?.playImmediately(atRate: app.speed) } }
     func pause() { endHold(); player?.pause(); currentStream?.pause(); isPlaying = false; saveProgress(flush: true) }
     func setSpeed(_ speed: Float) { app.speed = speed; holding = false; if isPlaying { player?.rate = speed } }
-    func beginHold() { guard isPlaying, rendered, !scrubbing else { return }; holding = true; player?.rate = 2 }
+    func beginHold() { guard isPlaying, rendered, !scrubbing, !holding else { return }; holding = true; player?.rate = 2; Haptics.holdSpeedBegan() }
     func endHold() { guard holding else { return }; holding = false; if (player?.rate ?? 0) > 0 { player?.rate = app.speed } }
     func setSeeking(_ editing: Bool) {
         endHold()

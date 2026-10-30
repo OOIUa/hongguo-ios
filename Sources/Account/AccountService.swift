@@ -280,6 +280,28 @@ final class AccountService: ObservableObject {
         if ticket == generation { try? persist(); scheduleUploads(force: false) }
     }
 
+    /// Whose 猜你喜欢 a new round shows: the verified app account's session, or nil for the anonymous feed.
+    var guessOwner: UUID? { authenticated && credentials != nil ? generation : nil }
+
+    /// One 猜你喜欢 batch. A non-nil owner carries that account's cookie and device only while the same login session
+    /// is still active, so an old round's pagination never mixes into a new account.
+    func guessBatch(owner: UUID?, cursor: String, offset: Int) async throws -> GuessBatch {
+        var account: GuessAccount?
+        if let owner {
+            guard owner == generation, authenticated, let candidate = credentials else { throw HGError.message("账号已变化，请刷新猜你喜欢") }
+            account = GuessAccount(cookie: appCookie(candidate), deviceID: candidate.deviceID, installID: candidate.installID, device: candidate.device)
+        }
+        let request = try GuessFeed.request(account: account, session: cursor, offset: offset)
+        let (bytes, response) = try await session.data(for: request)
+        try Task.checkCancellation()
+        if let owner, owner != generation { throw CancellationError() }
+        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+            throw HGError.message("猜你喜欢暂时不可用（HTTP \((response as? HTTPURLResponse)?.statusCode ?? 0)）")
+        }
+        guard !bytes.isEmpty else { throw HGError.message("猜你喜欢返回空响应，请稍后重试") }
+        return try GuessFeed.parse(ProtocolJSON.object(bytes))
+    }
+
     func isFavorite(_ drama: Drama) -> Bool { favorites.contains { $0.id == drama.id } }
     func resumePendingUploads() { scheduleUploads(force: false) }
     /// Called only for the current player after a displayed frame; never scans local history.
@@ -424,10 +446,7 @@ final class AccountService: ObservableObject {
         request.setValue("application/json; charset=utf-8,application/x-protobuf", forHTTPHeaderField: "Accept")
         for (key,value) in ["x-tt-request-tag":"t=0;n=0","sdk-version":"2","passport-sdk-version":"50561","x-xs-from-web":"0","x-tt-dt":""] { request.setValue(value,forHTTPHeaderField:key) }
         if body != nil { request.setValue("3.7.2.cn",forHTTPHeaderField:"x-vc-bdturing-sdk-version") }
-        var cookie = cookiePairs(candidate.cookie)
-        for (key,value) in cookiePairs(candidate.appDeviceCookie) where ["install_id","ttreq","store-region","store-region-src"].contains(key) { cookie[key] = value }
-        cookie["install_id"] = candidate.installID
-        request.setValue(cookie.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: "; "), forHTTPHeaderField: "Cookie")
+        request.setValue(appCookie(candidate), forHTTPHeaderField: "Cookie")
         if body != nil { request.setValue("application/json; charset=utf-8", forHTTPHeaderField: "Content-Type") }
         let (bytes,response) = try await session.data(for: request)
         try Task.checkCancellation()
@@ -503,6 +522,13 @@ final class AccountService: ObservableObject {
     }
     private func unique(_ values: [Drama]) -> [Drama] {
         var seen = Set<String>(); return Array(values.filter { seen.insert($0.id).inserted }.prefix(200))
+    }
+    /// Website session plus the registered app-device cookies; the account's stable iid is authoritative.
+    private func appCookie(_ candidate: AccountCredentials) -> String {
+        var cookie = cookiePairs(candidate.cookie)
+        for (key,value) in cookiePairs(candidate.appDeviceCookie) where ["install_id","ttreq","store-region","store-region-src"].contains(key) { cookie[key] = value }
+        cookie["install_id"] = candidate.installID
+        return cookie.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: "; ")
     }
     private func cookiePairs(_ value: String) -> [String:String] {
         var result = [String:String]()

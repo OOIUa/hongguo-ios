@@ -50,6 +50,44 @@ import JavaScriptCore
             return try await DramaAPI(resourceDirectory: resources).home(feed: "recommend", offset: 0)
         }
         do { _ = try await cancelled.value; fatalError("Cancelled request was accepted") } catch is CancellationError { }
+        // 猜你喜欢: request shape for anonymous and signed-in rounds, parsing, and pager batching.
+        let anonymous = try GuessFeed.request(account: nil, session: "", offset: 0, rticket: 1)
+        let anonymousQuery = URLComponents(url: anonymous.url!, resolvingAgainstBaseURL: false)!.queryItems!
+        func value(_ items: [URLQueryItem], _ name: String) -> String? { items.first { $0.name == name }?.value }
+        precondition(anonymous.url!.absoluteString.hasPrefix("https://api5-normal-sinfonlinea.fqnovel.com/reading/bookapi/bookmall/tab/v1/?") && anonymous.httpMethod == "GET")
+        precondition(anonymous.value(forHTTPHeaderField: "Cookie") == nil && value(anonymousQuery, "device_id") == nil)
+        precondition(value(anonymousQuery, "tab_type") == "16" && value(anonymousQuery, "client_req_type") == "1" && value(anonymousQuery, "session_id") == nil)
+        let account = GuessAccount(cookie: "sessionid=offline; install_id=9999999999999999998", deviceID: "9999999999999999999",
+                                   installID: "9999999999999999998", device: ["device_type": "OfflinePhone", "cdid": "not-forwarded"])
+        let signedIn = try GuessFeed.request(account: account, session: "srv", offset: 2, rticket: 1)
+        let signedQuery = URLComponents(url: signedIn.url!, resolvingAgainstBaseURL: false)!.queryItems!
+        precondition(signedIn.value(forHTTPHeaderField: "Cookie") == account.cookie && signedIn.value(forHTTPHeaderField: "X-Gorgon") == nil)
+        precondition(value(signedQuery, "device_id") == "9999999999999999999" && value(signedQuery, "iid") == "9999999999999999998")
+        precondition(value(signedQuery, "device_type") == "OfflinePhone" && value(signedQuery, "cdid") == nil)
+        precondition(value(signedQuery, "session_id") == "srv" && value(signedQuery, "offset") == "2" && value(signedQuery, "client_req_type") == "2")
+        precondition((try? GuessFeed.request(account: GuessAccount(cookie: "sessionid=x", deviceID: "", installID: "", device: [:]), session: "", offset: 0)) == nil)
+        let feed = try GuessFeed.parse(ProtocolJSON.object(Data(#"{"code":0,"data":{"tab_item":[{"tab_type":3},{"tab_type":16,"session_id":"srv","cell_data":[{"cell_name":"猜你喜欢","cell_data":[{"video_data":[{"video_detail":{"series_id":7698294694886788121,"series_title":"测试甲","series_cover":"https:\/\/p3.example.invalid\/a.jpg","series_intro":"简介","episode_cnt":80}},{"book_id":"7697622096326708286","book_name":"测试乙","cover":"https://p3.example.invalid/b.jpg"},{"series_id":"7698294694886788121","series_title":"重复"},{"series_id":"bad","series_title":"无效"}]}]}]}]}}"#.utf8)))
+        precondition(feed.dramas.map(\.id) == ["7698294694886788121", "7697622096326708286"] && feed.session == "srv")
+        precondition(feed.dramas[0].coverURL == "https://p3.example.invalid/a.jpg" && feed.dramas[0].episodeCount == 80)
+        precondition((try? GuessFeed.parse(["code": 1])) == nil)
+        precondition((try? GuessFeed.parse(["code": 0, "data": ["tab_item": [["tab_type": 16, "session_id": "a\nb"]]]])) == nil)
+        final class Calls: @unchecked Sendable { var values = [(String, Int)]() }
+        let calls = Calls()
+        let pager = GuessPager(owner: nil) { cursor, offset in
+            calls.values.append((cursor, offset))
+            return GuessBatch(dramas: (0..<3).map { Drama(id: "73000000000000\(offset * 3 + $0)", title: "剧", coverURL: "", summary: "", episodeCount: 1) },
+                              session: offset == 0 ? "srv" : "")
+        }
+        let first = try await pager.next()
+        precondition(first.dramas.count == 6 && first.nextOffset == 2 && first.hasMore)
+        precondition(calls.values.map(\.0) == ["", "srv"] && calls.values.map(\.1) == [0, 1])
+        _ = try await pager.next()
+        precondition(calls.values.last?.0 == "srv", "an empty session must not overwrite the server session")
+        let repeating = GuessPager(owner: nil) { _, _ in GuessBatch(dramas: [Drama(id: "7300000000000000001", title: "剧", coverURL: "", summary: "", episodeCount: 1)], session: "") }
+        let once = try await repeating.next(); precondition(once.dramas.count == 1)
+        let ended = try await repeating.next()
+        precondition(ended.dramas.isEmpty && !ended.hasMore)
+        print("PASS: 猜你喜欢 anonymous/signed-in request, parsing and pager batching.")
         print("PASS: 4 original Node signing vectors; exact 20/30-digit IDs; numeric-token parsing; binary/gzip body digest; URL spaces; cancelled query rejects before HTTP.")
     }
 }

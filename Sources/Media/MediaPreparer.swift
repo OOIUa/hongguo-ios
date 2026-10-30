@@ -107,6 +107,20 @@ actor MediaPreparer {
         if count <= 0 { pins.removeValue(forKey: url) } else { pins[url] = count }
     }
 
+    /// Bytes on disk in both playback caches (prepared episodes and progressive chunks).
+    func cacheSize() -> Int64 {
+        let caches = fm.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+        var total: Int64 = 0
+        for folder in [root, caches.appendingPathComponent("ProgressiveMedia-v1", isDirectory: true)] {
+            guard let files = fm.enumerator(at: folder, includingPropertiesForKeys: [.totalFileAllocatedSizeKey, .isRegularFileKey]) else { continue }
+            for case let file as URL in files {
+                let values = try? file.resourceValues(forKeys: [.totalFileAllocatedSizeKey, .isRegularFileKey])
+                if values?.isRegularFile == true { total += Int64(values?.totalFileAllocatedSize ?? 0) }
+            }
+        }
+        return total
+    }
+
     func clearCache() async throws {
         active.removeAll()
         try await ProgressiveCache.shared.clear()

@@ -35,17 +35,19 @@ struct SettingsView: View {
     @State private var clearing = false
     @State private var cacheMessage: String?
     @State private var confirmCache = false
+    @State private var cacheBytes: Int64?
     var body: some View {
         Form {
             Section("外观") { NavigationLink { ThemeSettingsView() } label: { HStack { Text("主题样式"); Spacer(); Text(model.theme.name).foregroundStyle(.secondary) } }; Toggle("深色模式时自动切换", isOn: $model.followSystemDark) }
             Section { Toggle("自动连播下一集", isOn: $model.autoNext); Toggle("下一集预加载", isOn: $model.preloadNext); Picker("默认播放速度", selection: $model.speed) { ForEach([Float(0.5), 0.75, 1, 1.25, 1.5, 2], id: \.self) { Text(String(format: "%g×", $0)).tag($0) } } } header: { Text("播放偏好") } footer: { Text("预加载会在当前集缓存完成后完整准备下一集，可能使用较多流量和存储空间，默认关闭。切到后台后停止播放与预加载。") }
-            Section { Button { confirmCache = true } label: { HStack { Text("清理播放缓存"); Spacer(); if clearing { ProgressView() } } }.disabled(clearing) } header: { Text("存储空间") } footer: { Text("播放缓存用于加速观看，不是永久离线保存。清理缓存不会删除收藏和历史。") }
+            Section { Button { confirmCache = true } label: { HStack { Text(cacheBytes.map { "清理播放缓存（\(ByteCountFormatter.string(fromByteCount: $0, countStyle: .file))）" } ?? "清理播放缓存"); Spacer(); if clearing { ProgressView() } } }.disabled(clearing) } header: { Text("存储空间") } footer: { Text("播放缓存用于加速观看，不是永久离线保存。清理缓存不会删除收藏和历史。") }
             Section("通用") { NavigationLink { UpdateView() } label: { HStack { Text("检查更新与全能签源"); Spacer(); Text(appVersionText).foregroundStyle(.secondary) } }; NavigationLink("关于红果独立版") { AboutView() } }
-        }.scrollContentBackground(.hidden).appBackground(model.appearance).tint(model.appearance.accent).navigationTitle("设置").navigationBarTitleDisplayMode(.inline).secondaryPage()
+        }.scrollContentBackground(.hidden).appBackground(model.appearance).tint(model.appearance.accent).navigationTitle("设置").navigationBarTitleDisplayMode(.inline).secondaryPage().task { await refreshCacheSize() }
             .confirmationDialog("清理播放缓存？", isPresented: $confirmCache, titleVisibility: .visible) { Button("清理缓存", role: .destructive) { clearCache() }; Button("取消", role: .cancel) {} }
             .alert("缓存", isPresented: Binding(get: { cacheMessage != nil }, set: { if !$0 { cacheMessage = nil } })) { Button("好") { cacheMessage = nil } } message: { Text(cacheMessage ?? "") }
     }
-    private func clearCache() { clearing = true; Task { do { try await MediaPreparer.shared.clearCache(); cacheMessage = "播放缓存已清理。" } catch { cacheMessage = friendlyError(error) }; clearing = false } }
+    private func clearCache() { clearing = true; Task { do { try await MediaPreparer.shared.clearCache(); cacheMessage = "播放缓存已清理。" } catch { cacheMessage = friendlyError(error) }; clearing = false; await refreshCacheSize() } }
+    private func refreshCacheSize() async { cacheBytes = await MediaPreparer.shared.cacheSize() }
 }
 
 struct ThemeSettingsView: View {
