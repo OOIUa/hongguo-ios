@@ -3,24 +3,24 @@
   "message": "项目维护者发布的未签名 IPA；需要自行签名安装。",
   "identifier": "ooiua.hongguo-ios.source",
   "sourceURL": "https://raw.githubusercontent.com/OOIUa/hongguo-ios/main/distribution/source.json",
-  "sourceicon": "https://raw.githubusercontent.com/OOIUa/hongguo-ios/v0.1.8/distribution/icon.png",
+  "sourceicon": "https://raw.githubusercontent.com/OOIUa/hongguo-ios/v0.1.9/distribution/icon.png",
   "apps": [
     {
       "name": "红果独立版",
       "type": "1",
       "bundleIdentifier": "com.ooiua.hongguo.ios",
-      "version": "0.1.8",
-      "build": 9,
+      "version": "0.1.9",
+      "build": 10,
       "minimumOSVersion": "17.0",
-      "versionDate": "2026-10-29T18:03:06Z",
-      "versionDescription": "登录红果账号后，「我的」顶部账号卡片显示红果昵称、头像和连接状态，账号页同步显示头像；没有头像或加载失败时保留默认图标。\n设置及其子页面（主题、检查更新、关于）和账号页改为全屏二级页面，不再显示底部标签栏，返回后恢复。\n「我的」页的播放历史、设置等入口，以及片单列表和热度榜行，整行都可点击，点右侧空白处也能进入。\n头像仅接受 https 地址，随账号加密保存在本机，退出或登录过期时一并清除。\n未签名 IPA，需使用本人的证书签名后安装。",
+      "versionDate": "2026-10-30T09:05:19Z",
+      "versionDescription": "沉浸暗场首页改为抖音式刷剧：全屏上下滑动，停在哪一部就直接播放它的第 1 集；点画面暂停或继续，按住左侧临时 2 倍速，「立即播放」从试看位置接着看，第 1 集看完后按钮变为「继续播放」直接看第 2 集。\n首页新增「推荐」并设为第一个标签：读取红果 App 的猜你喜欢推荐，未登录为匿名推荐，登录红果账号后按本人账号推荐；原热度列表改名「热度」。\n长按 2 倍速增加震动反馈（首页与播放器）。设置中的清理播放缓存会显示当前缓存大小。\n同步上游播放修复：部分剧集只剩无法解码的 1080P 时恢复更低清晰度；播放接口偶发空响应时自动换一个匿名播放设备重试一次。\n未签名 IPA，需使用本人的证书签名后安装。",
       "lock": "0",
-      "downloadURL": "https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.8/Hongguo-iOS-0.1.8-unsigned.ipa",
+      "downloadURL": "https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.9/Hongguo-iOS-0.1.9-unsigned.ipa",
       "isLanZouCloud": "0",
-      "iconURL": "https://raw.githubusercontent.com/OOIUa/hongguo-ios/v0.1.8/distribution/icon.png",
+      "iconURL": "https://raw.githubusercontent.com/OOIUa/hongguo-ios/v0.1.9/distribution/icon.png",
       "tintColor": "E8463F",
-      "size": "1322485",
-      "sha256": "0562ff005c21a4668423263f2d72c63f42a6634838b94caec41a97292c857f68"
+      "size": "1419803",
+      "sha256": "aa3c4855234f1a9fdbc7d3033c4b2c8e1f511fbe9251cb4ed464b8b53178b7a8"
     }
   ]
 }
