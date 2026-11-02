@@ -3,24 +3,24 @@
   "message": "项目维护者发布的未签名 IPA；需要自行签名安装。",
   "identifier": "ooiua.hongguo-ios.source",
   "sourceURL": "https://raw.githubusercontent.com/OOIUa/hongguo-ios/main/distribution/source.json",
-  "sourceicon": "https://raw.githubusercontent.com/OOIUa/hongguo-ios/v0.1.9/distribution/icon.png",
+  "sourceicon": "https://raw.githubusercontent.com/OOIUa/hongguo-ios/v0.1.10/distribution/icon.png",
   "apps": [
     {
       "name": "红果独立版",
       "type": "1",
       "bundleIdentifier": "com.ooiua.hongguo.ios",
-      "version": "0.1.9",
-      "build": 10,
+      "version": "0.1.10",
+      "build": 11,
       "minimumOSVersion": "17.0",
-      "versionDate": "2026-10-30T09:05:19Z",
-      "versionDescription": "沉浸暗场首页改为抖音式刷剧：全屏上下滑动，停在哪一部就直接播放它的第 1 集；点画面暂停或继续，按住左侧临时 2 倍速，「立即播放」从试看位置接着看，第 1 集看完后按钮变为「继续播放」直接看第 2 集。\n首页新增「推荐」并设为第一个标签：读取红果 App 的猜你喜欢推荐，未登录为匿名推荐，登录红果账号后按本人账号推荐；原热度列表改名「热度」。\n长按 2 倍速增加震动反馈（首页与播放器）。设置中的清理播放缓存会显示当前缓存大小。\n同步上游播放修复：部分剧集只剩无法解码的 1080P 时恢复更低清晰度；播放接口偶发空响应时自动换一个匿名播放设备重试一次。\n未签名 IPA，需使用本人的证书签名后安装。",
+      "versionDate": "2026-11-02T13:38:28Z",
+      "versionDescription": "修复无法播放：红果播放信息接口自 2026-11-02 起对旧请求只返回空响应，现改用官方 App 当前使用的接口获取片源，旧接口保留为备用。\n旧接口返回空响应时，换一个匿名播放设备后经备用域名重试一次；换设备失败也会用原设备重试。\n已知限制：新接口低于 1080P 的档位都是无法解码的格式，目前每集只提供 1080P。\n未签名 IPA，需使用本人的证书签名后安装。",
       "lock": "0",
-      "downloadURL": "https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.9/Hongguo-iOS-0.1.9-unsigned.ipa",
+      "downloadURL": "https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.10/Hongguo-iOS-0.1.10-unsigned.ipa",
       "isLanZouCloud": "0",
-      "iconURL": "https://raw.githubusercontent.com/OOIUa/hongguo-ios/v0.1.9/distribution/icon.png",
+      "iconURL": "https://raw.githubusercontent.com/OOIUa/hongguo-ios/v0.1.10/distribution/icon.png",
       "tintColor": "E8463F",
-      "size": "1419803",
-      "sha256": "aa3c4855234f1a9fdbc7d3033c4b2c8e1f511fbe9251cb4ed464b8b53178b7a8"
+      "size": "1415477",
+      "sha256": "8c54a1420a09a58ceac9a8f394849c19c8b318587c396530e0d5dc672d90884b"
     }
   ]
 }
