@@ -88,6 +88,26 @@ import JavaScriptCore
         let ended = try await repeating.next()
         precondition(ended.dramas.isEmpty && !ended.hasMore)
         print("PASS: 猜你喜欢 anonymous/signed-in request, parsing and pager batching.")
+        // video_tab playback model: full GetVideoModelRequest query, object/string model, rejection of unusable replies.
+        let identity = RegisteredIdentity(deviceID: "9999999999999999999", installID: "9999999999999999998", cdid: "offline", appDeviceCookie: "")
+        let tabURL = DramaAPI.tabVideoURL(identity, episodeID: "7600000000000000001", rticket: 1)
+        let tabQuery = URLComponents(url: tabURL, resolvingAgainstBaseURL: false)!.queryItems!
+        precondition(tabURL.absoluteString.hasPrefix("https://api5-normal-sinfonlineb.fqnovel.com/reading/bookapi/video_tab/multi_video_model/v1/?"))
+        for (name, expected) in [("video_id","7600000000000000001"),("video_id_type","0"),("device_level","1"),("need_all_video_definition","1"),
+                                 ("need_mp4_align","0"),("use_os_player","0"),("video_platform","1024"),("source","0"),("from_video_id",""),
+                                 ("device_id","9999999999999999999"),("iid","9999999999999999998")] {
+            precondition(value(tabQuery, name) == expected, "video_tab query \(name)")
+        }
+        let tabObject = DramaAPI.tabVideoModel(Data(#"{"code":0,"data":{"video_model_data":{"7600000000000000001":{"video_model":{"video_list":[{"codec_type":"bytevc1"}]}}}}}"#.utf8), episodeID: "7600000000000000001")
+        precondition(ProtocolJSON.array(tabObject?["video_list"]).count == 1)
+        let tabString = DramaAPI.tabVideoModel(Data(#"{"code":0,"data":{"video_model_data":{"7600000000000000001":{"video_model":"{\"video_list\":[{\"codec_type\":\"h264\"}]}"}}}}"#.utf8), episodeID: "7600000000000000001")
+        precondition(tabString != nil)
+        precondition(DramaAPI.tabVideoModel(Data(#"{"code":100103,"message":"PARAM_INVALID"}"#.utf8), episodeID: "7600000000000000001") == nil)
+        precondition(DramaAPI.tabVideoModel(Data(), episodeID: "7600000000000000001") == nil)
+        precondition(DramaAPI.tabVideoModel(Data(#"{"code":0,"data":{"video_model_data":{"7600000000000000999":{"video_model":{"video_list":[{}]}}}}}"#.utf8), episodeID: "7600000000000000001") == nil)
+        precondition(DramaAPI.tabVideoModel(Data(#"{"code":0,"data":{"video_model_data":{"7600000000000000001":{"video_model":{"video_list":[]}}}}}"#.utf8), episodeID: "7600000000000000001") == nil)
+        precondition(DramaAPI.playbackURL(identity, host: DramaAPI.playbackRetryHost, rticket: 1).absoluteString.hasPrefix("https://api5-normal-hl.fqnovel.com/novel/player/multi_video_model/v1/?"))
+        print("PASS: video_tab playback model request and parsing.")
         print("PASS: 4 original Node signing vectors; exact 20/30-digit IDs; numeric-token parsing; binary/gzip body digest; URL spaces; cancelled query rejects before HTTP.")
     }
 }

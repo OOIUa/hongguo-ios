@@ -173,24 +173,33 @@ actor DramaAPI {
         let body = try ProtocolJSON.data(["biz_param":biz,"mixed_video_id_map":["1004":[episodeID]]])
         let headers = ["User-Agent":PlaybackRegistration.userAgent, "Accept":"application/json; charset=utf-8,application/x-protobuf", "Content-Type":"application/json; charset=UTF-8"]
         var identity = try await playbackIdentity()
-        var response: [String: Any] = [:]
-        for attempt in 0..<2 {
-            let data = try await fetch(url: Self.playbackURL(identity), body: body, headers: headers)
-            if !data.isEmpty {
-                do { response = try ProtocolJSON.object(data) } catch { throw HGError.message("服务数据格式发生变化，请稍后重试") }
-                break
+        let model: [String: Any]
+        // The official App now reads GET video_tab/multi_video_model; since 2026-11-02 the POST /novel/player
+        // endpoint answers every variant with 0 bytes. Try it once and keep the old flow as the fallback
+        // (synchronized from hongguoTV 0.1.15).
+        if let tab = await tabVideoModel(episodeID: episodeID, identity: identity) {
+            model = tab
+        } else {
+            var response: [String: Any] = [:]
+            for attempt in 0..<2 {
+                let data = try await fetch(url: Self.playbackURL(identity, host: attempt == 0 ? Self.playbackHost : Self.playbackRetryHost), body: body,
+                                           headers: attempt == 0 ? headers : headers.merging(["Connection":"close"]) { $1 })
+                if !data.isEmpty {
+                    do { response = try ProtocolJSON.object(data) } catch { throw HGError.message("服务数据格式发生变化，请稍后重试") }
+                    break
+                }
+                // An empty reply usually means the anonymous identity was rejected: renew it and, 300 ms later, retry
+                // once on the alternate host over a fresh connection. A failed renewal still retries with the old
+                // identity (synchronized from hongguo-drama 5.4). A second empty reply is reported.
+                try Task.checkCancellation()
+                guard attempt == 0 else { throw HGError.message("播放服务返回空响应，疑似播放设备身份被拒，请稍后重试") }
+                if let renewed = try? await renewPlaybackIdentity(rejected: identity) { identity = renewed }
+                try await Task.sleep(nanoseconds: 300_000_000)
             }
-            // An empty reply usually means the anonymous identity was rejected: retry once with a newly
-            // registered one (synchronized from hongguo-drama 5.0). A second empty reply is reported.
-            try Task.checkCancellation()
-            guard attempt == 0, let renewed = try? await renewPlaybackIdentity(rejected: identity), renewed.deviceID != identity.deviceID else {
-                throw HGError.message("播放服务返回空响应，疑似播放设备身份被拒，请稍后重试")
-            }
-            identity = renewed
+            guard ProtocolJSON.integer(response["code"] ?? response["Code"]) == 0 else { throw HGError.message("当前分集暂未提供播放信息") }
+            let entry = ProtocolJSON.dictionary(ProtocolJSON.dictionary(response["data"])[episodeID])
+            model = ProtocolJSON.dictionary(entry["video_model"])
         }
-        guard ProtocolJSON.integer(response["code"] ?? response["Code"]) == 0 else { throw HGError.message("当前分集暂未提供播放信息") }
-        let entry = ProtocolJSON.dictionary(ProtocolJSON.dictionary(response["data"])[episodeID])
-        let model = ProtocolJSON.dictionary(entry["video_model"])
         guard !model.isEmpty else { throw HGError.message("服务暂未返回当前分集片源") }
         let inline = !(model["video_list"] as? [Any] ?? []).isEmpty
         var info = model
@@ -256,10 +265,37 @@ actor DramaAPI {
         return try await playbackIdentity()
     }
 
-    static func playbackURL(_ identity: RegisteredIdentity, rticket: Int64 = Int64(Date().timeIntervalSince1970 * 1000)) -> URL {
+    static let playbackHost = "api5-normal-sinfonlineb.fqnovel.com", playbackRetryHost = "api5-normal-hl.fqnovel.com"
+
+    static func playbackURL(_ identity: RegisteredIdentity, host: String = playbackHost, rticket: Int64 = Int64(Date().timeIntervalSince1970 * 1000)) -> URL {
         let profile = identity.device
         let query = profile.keys.sorted().map { [ $0, profile[$0]! ] } + [["_rticket",String(rticket)]]
-        return URL(string: "https://api5-normal-sinfonlineb.fqnovel.com/novel/player/multi_video_model/v1/?" + query.map { encode($0[0])+"="+encode($0[1]) }.joined(separator: "&"))!
+        return URL(string: "https://\(host)/novel/player/multi_video_model/v1/?" + query.map { encode($0[0])+"="+encode($0[1]) }.joined(separator: "&"))!
+    }
+
+    /// One request to the video_tab endpoint; any failure returns nil so the caller falls back to the old flow.
+    private func tabVideoModel(episodeID: String, identity: RegisteredIdentity) async -> [String: Any]? {
+        var headers = ["User-Agent":PlaybackRegistration.userAgent, "Accept":"application/json; charset=utf-8"]
+        if !identity.appDeviceCookie.isEmpty { headers["Cookie"] = identity.appDeviceCookie }
+        guard let data = try? await fetch(url: Self.tabVideoURL(identity, episodeID: episodeID), headers: headers) else { return nil }
+        return Self.tabVideoModel(data, episodeID: episodeID)
+    }
+
+    /// Every GetVideoModelRequest field is required; a missing one is answered with 100103 PARAM_INVALID.
+    static func tabVideoURL(_ identity: RegisteredIdentity, episodeID: String, rticket: Int64 = Int64(Date().timeIntervalSince1970 * 1000)) -> URL {
+        let profile = identity.device
+        let query = profile.keys.sorted().map { [ $0, profile[$0]! ] } + [["_rticket",String(rticket)],
+            ["video_id",episodeID],["video_id_type","0"],["device_level","1"],["need_all_video_definition","1"],["need_mp4_align","0"],
+            ["use_os_player","0"],["video_platform","1024"],["source","0"],["from_video_id",""]]
+        return URL(string: "https://\(playbackHost)/reading/bookapi/video_tab/multi_video_model/v1/?" + query.map { encode($0[0])+"="+encode($0[1]) }.joined(separator: "&"))!
+    }
+
+    /// `data.video_model_data[id].video_model` (object or JSON string) with a non-empty `video_list`, else nil.
+    static func tabVideoModel(_ data: Data, episodeID: String) -> [String: Any]? {
+        guard let root = try? ProtocolJSON.object(data), ProtocolJSON.integer(root["code"] ?? root["Code"] ?? -1) == 0 else { return nil }
+        let rows = ProtocolJSON.dictionary(ProtocolJSON.dictionary(root["data"])["video_model_data"])
+        let model = ProtocolJSON.dictionary(ProtocolJSON.dictionary(rows[episodeID])["video_model"])
+        return ProtocolJSON.array(model["video_list"]).isEmpty ? nil : model
     }
 
     private func rank(offset: Int) async throws -> DramaPage {

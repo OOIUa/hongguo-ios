@@ -1,5 +1,14 @@
 # iOS 验证记录
 
+## 0.1.10 / build 11：播放信息改读 video_tab 接口
+
+日期：2026-11-02。同步 Android 0.7.12 的对应改动。
+
+- 2026-11-02 起 `POST /novel/player/multi_video_model/v1/` 返回 HTTP 200 + 0 字节：改动前 `test-media-live.sh --live` 在 `stage=track` 失败。`DramaAPI.track` 现先以注册的匿名身份请求一次 `GET /reading/bookapi/video_tab/multi_video_model/v1/`（带齐 GetVideoModelRequest 字段、`device_level=1`，有注册 Cookie 时附带），解析 `data.video_model_data[id].video_model`；失败时回退旧流程（hongguoTV 0.1.15）。
+- 旧流程空响应：换新身份后隔 300ms 经 `api5-normal-hl.fqnovel.com`、`Connection: close` 重试一次；换身份失败仍以原身份重试（hongguo-drama 5.4）。未同步其恢复的请求签名。
+- 测试：`scripts/test-network.sh`（新增 video_tab 请求字段、响应解析与备用域名 URL 用例）通过；`test-media-live.sh --live`（1080p 匿名取链至 AVFoundation 解码 75 帧）与 `test-progressive-live.sh --live`（下载完成前出首帧）通过。
+- 已知限制：新接口低于 1080P 的档位均为 bytevc2，被过滤后只剩 1080P；未在模拟器 App 内实测播放。
+
 ## 0.1.9 / build 10：沉浸暗场自动试看、推荐流与播放修复
 
 日期：2026-10-30。同步 Android 0.7.10–0.7.11 的对应改动。
