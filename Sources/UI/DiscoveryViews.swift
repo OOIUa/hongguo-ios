@@ -45,7 +45,7 @@ struct HomeView: View {
                 feedSelector
                 if model.appearance == .cards && !loader.dramas.isEmpty { ranking }
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: model.appearance == .warm ? 104 : 145), spacing: 12)], alignment: .leading, spacing: 20) {
-                    ForEach(loader.dramas) { drama in NavigationLink { DetailView(drama: drama) } label: { DramaPoster(drama: drama) }.buttonStyle(.plain) }
+                    ForEach(loader.dramas) { drama in NavigationLink { DetailView(drama: drama) } label: { DramaPoster(drama: drama) }.buttonStyle(.plain).onAppear { loader.itemAppeared(drama) { load() } } }
                 }
                 if loader.dramas.isEmpty && !loader.isLoading && loader.error == nil { EmptyStateView(symbol: "sparkles.tv", title: "这一页暂时没有剧集", message: "可以刷新，或切换上方的内容类型。") }
                 LoadMoreView(loader: loader) { load(reset: loader.dramas.isEmpty) }
@@ -174,6 +174,7 @@ private struct ImmersiveFeed: View {
     private var isLast: Bool { index >= loader.dramas.count - 1 }
 
     private func prefetch() {
+        if loader.dramas.indices.contains(index) { loader.preloadCovers(after: loader.dramas[index]) }
         if index >= loader.dramas.count - 3 && loader.hasMore && loader.error == nil && !loader.isLoading { load(false) }
     }
 
@@ -346,9 +347,9 @@ struct DiscoverView: View {
                     HStack(spacing: 12) { Image(systemName: "slider.horizontal.3").font(.title3); VStack(alignment: .leading, spacing: 4) { Text("筛选条件").font(.subheadline.weight(.semibold)); Text(selection.isEmpty ? "按题材、排序等条件查找" : "已应用 \(selection.count) 项条件").font(.caption).foregroundStyle(model.appearance.muted) }; Spacer(); Text("筛选").font(.subheadline.weight(.medium)); Image(systemName: "chevron.down").font(.caption) }.foregroundStyle(model.appearance.ink).padding(17).background(model.appearance.surface, in: RoundedRectangle(cornerRadius: 17))
                 }.buttonStyle(.plain)
                 if model.appearance == .cards {
-                    LazyVStack(spacing: 12) { ForEach(loader.dramas) { drama in DramaListRow(drama: drama) } }
+                    LazyVStack(spacing: 12) { ForEach(loader.dramas) { drama in DramaListRow(drama: drama).onAppear { loader.itemAppeared(drama) { load() } } } }
                 } else {
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: model.appearance == .immersive ? 100 : 140), spacing: 12)], spacing: 20) { ForEach(loader.dramas) { drama in NavigationLink { DetailView(drama: drama) } label: { DramaPoster(drama: drama) }.buttonStyle(.plain) } }
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: model.appearance == .immersive ? 100 : 140), spacing: 12)], spacing: 20) { ForEach(loader.dramas) { drama in NavigationLink { DetailView(drama: drama) } label: { DramaPoster(drama: drama) }.buttonStyle(.plain).onAppear { loader.itemAppeared(drama) { load() } } } }
                 }
                 if loader.dramas.isEmpty && !loader.isLoading && loader.error == nil { EmptyStateView(symbol: "line.3.horizontal.decrease.circle", title: "没有符合条件的剧集", message: "试试减少筛选条件，或切换内容类型。") }
                 LoadMoreView(loader: loader) { load(reset: loader.dramas.isEmpty) }
@@ -410,7 +411,7 @@ struct SearchView: View {
                 if submitted.isEmpty { EmptyStateView(symbol: "magnifyingglass", title: "寻找你的下一部好剧", message: "输入剧名或关键词，发现喜欢的故事。") }
                 else {
                     SectionHeading(title: "“\(submitted)”的结果", subtitle: "\(loader.dramas.count) 部")
-                    LazyVStack(spacing: 12) { ForEach(loader.dramas) { drama in DramaListRow(drama: drama) } }
+                    LazyVStack(spacing: 12) { ForEach(loader.dramas) { drama in DramaListRow(drama: drama).onAppear { loader.itemAppeared(drama) { load() } } } }
                     if loader.dramas.isEmpty && !loader.isLoading && loader.error == nil { EmptyStateView(symbol: "doc.text.magnifyingglass", title: "没有找到相关短剧", message: "换一个关键词再试试。") }
                     LoadMoreView(loader: loader) { load(reset: loader.dramas.isEmpty) }
                 }

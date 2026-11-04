@@ -206,7 +206,10 @@ final class AccountService: ObservableObject {
             }
             let (json, response) = try await appJSON(candidate, path: "/reading/user/info/v1/")
             let data = ProtocolJSON.dictionary(json["data"])
-            guard let rawID = AccountRules.businessID(data["biz_user_id"]) else { throw HGError.message("账号资料未返回有效的业务身份，请重新验证。") }
+            guard let rawID = AccountRules.businessID(data["biz_user_id"]) else {
+                // A valid session on a number that never opened the official App has no business account (hongguoTV 0.1.18).
+                throw HGError.message(candidate.source == "APP" && ProtocolJSON.text(data["biz_user_id"]).isEmpty ? "该账号还没有红果账号资料，请先用官方红果 App 登录一次后再试" : "账号资料未返回有效的业务身份，请重新验证。")
+            }
             let gateway = response.value(forHTTPHeaderField: "X-Tt-Agw-Login")
             guard rawID != candidate.deviceID, rawID != candidate.installID,
                   ProtocolJSON.identifier(rawID) != nil || gateway == "1" else {
@@ -283,23 +286,24 @@ final class AccountService: ObservableObject {
     /// Whose 猜你喜欢 a new round shows: the verified app account's session, or nil for the anonymous feed.
     var guessOwner: UUID? { authenticated && credentials != nil ? generation : nil }
 
-    /// One 猜你喜欢 batch. A non-nil owner carries that account's cookie and device only while the same login session
+    /// One 猜你喜欢 batch. A non-nil owner carries that account's login cookie only while the same login session
     /// is still active, so an old round's pagination never mixes into a new account.
     func guessBatch(owner: UUID?, cursor: String, offset: Int) async throws -> GuessBatch {
         var account: GuessAccount?
         if let owner {
             guard owner == generation, authenticated, let candidate = credentials else { throw HGError.message("账号已变化，请刷新猜你喜欢") }
-            account = GuessAccount(cookie: appCookie(candidate), deviceID: candidate.deviceID, installID: candidate.installID, device: candidate.device)
+            account = GuessAccount(cookie: candidate.cookie, device: candidate.device)
         }
-        let request = try GuessFeed.request(account: account, session: cursor, offset: offset)
-        let (bytes, response) = try await session.data(for: request)
-        try Task.checkCancellation()
-        if let owner, owner != generation { throw CancellationError() }
-        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-            throw HGError.message("猜你喜欢暂时不可用（HTTP \((response as? HTTPURLResponse)?.statusCode ?? 0)）")
+        return try await GuessFeed.batch(account: account, session: cursor, offset: offset) { request in
+            let (bytes, response) = try await session.data(for: request)
+            try Task.checkCancellation()
+            if let owner, owner != generation { throw CancellationError() }
+            guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+                throw HGError.message("猜你喜欢暂时不可用（HTTP \((response as? HTTPURLResponse)?.statusCode ?? 0)）")
+            }
+            guard !bytes.isEmpty else { throw HGError.message("猜你喜欢返回空响应，请稍后重试") }
+            return try ProtocolJSON.object(bytes)
         }
-        guard !bytes.isEmpty else { throw HGError.message("猜你喜欢返回空响应，请稍后重试") }
-        return try GuessFeed.parse(ProtocolJSON.object(bytes))
     }
 
     func isFavorite(_ drama: Drama) -> Bool { favorites.contains { $0.id == drama.id } }

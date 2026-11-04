@@ -19,8 +19,6 @@ actor DramaAPI {
     private var detailOrder: [String] = []
     private var seenByDiscovery: [String: [String]] = [:]
     private var searchCursors: [String: SearchCursor] = [:]
-    private var registered: RegisteredIdentity?
-    private var registrationTask: Task<RegisteredIdentity, Error>?
     private var registrationFailedAt: Date?
     private var filterCache: [String: [FilterGroup]] = [:]
 
@@ -172,7 +170,7 @@ actor DramaAPI {
             "need_mp4_align":false,"use_os_player":false,"use_server_dns":false,"video_platform":1024]
         let body = try ProtocolJSON.data(["biz_param":biz,"mixed_video_id_map":["1004":[episodeID]]])
         let headers = ["User-Agent":PlaybackRegistration.userAgent, "Accept":"application/json; charset=utf-8,application/x-protobuf", "Content-Type":"application/json; charset=UTF-8"]
-        var identity = try await playbackIdentity()
+        var identity = try await freshPlaybackIdentity()
         let model: [String: Any]
         // The official App now reads GET video_tab/multi_video_model; since 2026-11-02 the POST /novel/player
         // endpoint answers every variant with 0 bytes. Try it once and keep the old flow as the fallback
@@ -193,7 +191,7 @@ actor DramaAPI {
                 // identity (synchronized from hongguo-drama 5.4). A second empty reply is reported.
                 try Task.checkCancellation()
                 guard attempt == 0 else { throw HGError.message("播放服务返回空响应，疑似播放设备身份被拒，请稍后重试") }
-                if let renewed = try? await renewPlaybackIdentity(rejected: identity) { identity = renewed }
+                if let renewed = try? await freshPlaybackIdentity() { identity = renewed }
                 try await Task.sleep(nanoseconds: 300_000_000)
             }
             guard ProtocolJSON.integer(response["code"] ?? response["Code"]) == 0 else { throw HGError.message("当前分集暂未提供播放信息") }
@@ -201,31 +199,71 @@ actor DramaAPI {
             model = ProtocolJSON.dictionary(entry["video_model"])
         }
         guard !model.isEmpty else { throw HGError.message("服务暂未返回当前分集片源") }
-        let inline = !(model["video_list"] as? [Any] ?? []).isEmpty
-        var info = model
-        if !inline {
-            let address = fallbackURL(model["fallback_api"])
-            let fallback = try checkedURL(address, domains: ["fqnovel.com","snssdk.com"])
-            let outer = try await request(url: fallback, body: nil, headers: ["User-Agent":PlaybackRegistration.userAgent])
-            let outerInfo = ProtocolJSON.dictionary(outer["video_info"])
-            guard ProtocolJSON.integer(outer["Code"] ?? outer["code"]) == 0, ProtocolJSON.integer(outerInfo["Code"]) == 0 else { throw HGError.message("当前分集暂时无法播放") }
-            info = ProtocolJSON.dictionary(outerInfo["data"])
+        return try await modelTrack(model)
+    }
+
+    /// Picks a track from a playback model. Inline rows with neither a key nor a declared encryption state may use the
+    /// model's fallback_api, whose answer must separately match id, full duration, quality and encryption
+    /// (synchronized from hongguo-drama 5.5).
+    func modelTrack(_ model: [String: Any], readFallback: (@Sendable (String) async throws -> [String: Any])? = nil) async throws -> VideoTrack {
+        let read: @Sendable (String) async throws -> [String: Any] = readFallback ?? { [self] in try await request(url: try await checkedFallback($0), body: nil, headers: ["User-Agent":PlaybackRegistration.userAgent]) }
+        let address = fallbackURL(model["fallback_api"])
+        guard !(model["video_list"] as? [Any] ?? []).isEmpty else {
+            return try selectTrack(try fallbackInfo(try await read(address)), requireEncryption: false, minimumPixels: 0)
         }
+        do {
+            return try selectTrack(model, requireEncryption: true, minimumPixels: 0)
+        } catch let incomplete as IncompleteEncryption {
+            let id = ProtocolJSON.text(model["video_id"]).trimmingCharacters(in: .whitespacesAndNewlines), duration = Double(ProtocolJSON.text(model["video_duration"])) ?? 0
+            guard !id.isEmpty, duration > 0, incomplete.minimumPixels > 0, !address.isEmpty else { throw incomplete }
+            let info = try fallbackInfo(try await read(address)), other = Double(ProtocolJSON.text(info["video_duration"])) ?? 0
+            guard ProtocolJSON.text(info["video_id"]) == id, other > 0, abs(other - duration) <= 0.5 else {
+                throw HGError.message("备用片源编号或完整时长无法确认，已停止取址")
+            }
+            return try selectTrack(info, requireEncryption: true, minimumPixels: incomplete.minimumPixels)
+        }
+    }
+
+    private func checkedFallback(_ address: String) throws -> URL { try checkedURL(address, domains: ["fqnovel.com","snssdk.com"]) }
+
+    private func fallbackInfo(_ outer: [String: Any]) throws -> [String: Any] {
+        let outerInfo = ProtocolJSON.dictionary(outer["video_info"])
+        guard ProtocolJSON.integer(outer["Code"] ?? outer["code"]) == 0, ProtocolJSON.integer(outerInfo["Code"]) == 0 else { throw HGError.message("当前分集暂时无法播放") }
+        return ProtocolJSON.dictionary(outerInfo["data"])
+    }
+
+    /// The selected inline rows lack encryption metadata; the caller may try the verified fallback.
+    private struct IncompleteEncryption: LocalizedError {
+        let minimumPixels: Int
+        var errorDescription: String? { "当前分集的播放地址或解密信息暂时不可用" }
+    }
+
+    private func selectTrack(_ info: [String: Any], requireEncryption: Bool, minimumPixels: Int) throws -> VideoTrack {
         let rawList = info["video_list"]
         let items = (rawList as? [Any] ?? Array(ProtocolJSON.dictionary(rawList).values)).map { ProtocolJSON.dictionary($0) }
-        let rows = items.compactMap { item -> (item: [String: Any], rank: Int, pixels: Int, quality: String)? in
+        let compatible = items.compactMap { item -> (item: [String: Any], rank: Int, pixels: Int, shortSide: Int, quality: String)? in
             let meta = ProtocolJSON.dictionary(item["video_meta"]), codec = firstText(item["codec_type"],meta["codec_type"]).lowercased()
             let rank = ["h264","avc","avc1"].contains(codec) ? 0 : ["hevc","h265","hvc1","hev1","bytevc1"].contains(codec) ? 1 : 2
             guard rank < 2 else { return nil }
             let quality = firstText(item["quality_desc"],item["definition"],meta["definition"],item["height"],item["vheight"])
             let width = ProtocolJSON.integer(item["vwidth"] ?? item["width"] ?? meta["width"]), height = ProtocolJSON.integer(item["vheight"] ?? item["height"] ?? meta["height"])
-            let pixels = width > 0 && height > 0 ? min(width,height) : Int(quality.filter(\.isNumber)) ?? 0
-            return (item,rank,pixels,quality)
+            let shortSide = width > 0 && height > 0 ? min(width,height) : 0
+            let pixels = shortSide > 0 ? shortSide : Int(quality.filter(\.isNumber)) ?? 0
+            return (item,rank,pixels,shortSide,quality)
         }.sorted { $0.rank == $1.rank ? $0.pixels > $1.pixels : $0.rank < $1.rank }
+        // Codecs are locked per episode: no parameter, identity or endpoint yields another (hongguoTV 0.1.16, hongguo-drama 5.6).
+        if compatible.isEmpty, items.contains(where: { firstText($0["codec_type"],ProtocolJSON.dictionary($0["video_meta"])["codec_type"]).lowercased() == "bytevc2" }) {
+            throw HGError.message("本集仅提供播放器不支持的 ByteVC2 编码，当前无法播放，请在官方 App 观看")
+        }
+        let rows = compatible.filter { minimumPixels == 0 || $0.shortSide >= minimumPixels }
+        var incomplete = false
         let seedText = ProtocolJSON.text(info["key_seed"]), seed = Self.base64(seedText)
         for row in rows {
             let encryptInfo = ProtocolJSON.dictionary(row.item["encrypt_info"]), spade = firstText(row.item["spade_a"],encryptInfo["spade_a"])
-            if inline && spade.isEmpty && !["false","0"].contains(ProtocolJSON.text(encryptInfo["encrypt"]).lowercased()) { continue }
+            if requireEncryption && spade.isEmpty && !["false","0"].contains(ProtocolJSON.text(encryptInfo["encrypt"]).lowercased()) {
+                if encryptInfo["encrypt"] == nil { incomplete = true }
+                continue
+            }
             if !spade.isEmpty && (try? SpadeKey.decode(spade)) == nil { continue }
             let candidates = [row.item["main_url"],row.item["backup_url"]].compactMap { $0 as? String } + (row.item["backup_url_list"] as? [String] ?? [])
             for candidate in candidates where !candidate.isEmpty {
@@ -236,6 +274,7 @@ actor DramaAPI {
                 } catch { continue }
             }
         }
+        if incomplete, let best = rows.first { throw IncompleteEncryption(minimumPixels: best.shortSide) }
         throw HGError.message("当前分集的播放地址或解密信息暂时不可用")
     }
 
@@ -246,23 +285,12 @@ actor DramaAPI {
         while detailOrder.count > 80 { let oldest = detailOrder.removeFirst(); detailCache.removeValue(forKey: oldest); detailExpiry.removeValue(forKey: oldest) }
     }
 
-    private func playbackIdentity() async throws -> RegisteredIdentity {
-        if let registered { return registered }
-        if let task = registrationTask { return try await task.value }
-        if let failed = registrationFailedAt, Date().timeIntervalSince(failed) < 30 { throw HGError.message("匿名播放设备注册失败，请稍后重试") }
-        let session = session
-        let task = Task { try await PlaybackRegistration.register(session: session) }
-        registrationTask = task
-        do { let identity = try await task.value; registered = identity; registrationTask = nil; registrationFailedAt = nil; return identity }
-        catch { registrationTask = nil; if !(error is CancellationError) { registrationFailedAt = Date() }; throw error }
-    }
-
-    /// Replaces an identity the playback API rejected. Callers that saw the same rejection share one renewal.
-    private func renewPlaybackIdentity(rejected: RegisteredIdentity) async throws -> RegisteredIdentity {
-        if let task = registrationTask { return try await task.value }
-        if let registered, registered.deviceID != rejected.deviceID { return registered }
-        registered = nil
-        return try await playbackIdentity()
+    /// Registers a new anonymous identity. Identities may be single-use, so every model request gets its own
+    /// (synchronized from hongguo-drama 5.5). A failure is reused for 10 seconds to prevent a registration storm.
+    private func freshPlaybackIdentity() async throws -> RegisteredIdentity {
+        if let failed = registrationFailedAt, Date().timeIntervalSince(failed) < 10 { throw HGError.message("匿名播放设备注册失败，请稍后重试") }
+        do { let identity = try await PlaybackRegistration.register(session: session); registrationFailedAt = nil; return identity }
+        catch { if !(error is CancellationError) { registrationFailedAt = Date() }; throw error }
     }
 
     static let playbackHost = "api5-normal-sinfonlineb.fqnovel.com", playbackRetryHost = "api5-normal-hl.fqnovel.com"

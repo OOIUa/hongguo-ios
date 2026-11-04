@@ -86,6 +86,7 @@ final class CatalogLoader: ObservableObject {
     private var offset = 0
     private var generation = UUID()
     private var task: Task<Void, Never>?
+    private var preloadedCovers = Set<String>()
 
     func load(reset: Bool = false, fetch: @escaping (Int) async throws -> DramaPage) {
         if isLoading && !reset { return }
@@ -93,7 +94,7 @@ final class CatalogLoader: ObservableObject {
         task?.cancel()
         let ticket = UUID(); generation = ticket
         let requestedOffset = reset ? 0 : offset
-        if reset { dramas = []; offset = 0; hasMore = false }
+        if reset { dramas = []; offset = 0; hasMore = false; preloadedCovers = [] }
         isLoading = true; error = nil
         task = Task { [weak self] in
             do {
@@ -115,6 +116,23 @@ final class CatalogLoader: ObservableObject {
     }
 
     func cancel() { task?.cancel(); generation = UUID(); isLoading = false }
+
+    /// Call as a row appears. Requests the next page once it is within 12 of the end, so it is in the list before the
+    /// user gets there. A failed page waits for the retry button, so a dead network cannot turn scrolling into a loop.
+    func itemAppeared(_ drama: Drama, load: () -> Void) {
+        preloadCovers(after: drama)
+        guard hasMore, error == nil, !isLoading, dramas.suffix(12).contains(where: { $0.id == drama.id }) else { return }
+        load()
+    }
+
+    /// Fills URLCache, which AsyncImage reads, with the next covers (about 50 KB each, cacheable for a year).
+    func preloadCovers(after drama: Drama) {
+        guard let index = dramas.firstIndex(where: { $0.id == drama.id }) else { return }
+        for next in dramas[(index + 1)...].prefix(9) where preloadedCovers.insert(next.coverURL).inserted {
+            guard let url = URL(string: next.coverURL), url.scheme == "https" else { continue }
+            URLSession.shared.dataTask(with: url).resume()
+        }
+    }
 }
 
 func friendlyError(_ error: Error) -> String {

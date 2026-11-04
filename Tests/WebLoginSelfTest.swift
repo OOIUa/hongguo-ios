@@ -64,6 +64,9 @@ struct WebLoginSelfTest {
         try check(WebLoginRules.failure(code: 1102, needsVerification: false).contains("验证码有误"), "code-1102"); pass()
         try check(WebLoginRules.failure(code: 1003, needsVerification: false).contains("会话已失效"), "code-1003"); pass()
         try check(WebLoginRules.failure(code: 1, needsVerification: true).contains("滑块验证"), "verify-center"); pass()
+        try check(WebLoginRules.failure(code: 1, needsVerification: true).contains("官网"), "verify-center-points-to-website"); pass()
+        try check(WebLoginRules.phoneDigits("+86 138-0013-8000") == "13800138000" && WebLoginRules.phoneDigits("138001380009") == "13800138000" && WebLoginRules.phoneDigits("86") == "86", "phone-digits"); pass()
+        try check(WebLoginRules.validMainlandPhone("13800138000") && !WebLoginRules.validMainlandPhone("12800138000"), "valid-phone"); pass()
         try check(WebLoginRules.qrLifetime(nil) == 180 && WebLoginRules.qrLifetime(9999) == 600, "qr-lifetime-clamped"); pass()
         let now = Date(timeIntervalSince1970: 1_800_000_000)
         try check(WebLoginRules.qrLifetime(1_800_000_120, now: now) == 120, "qr-lifetime-timestamp"); pass()
@@ -97,13 +100,16 @@ struct WebLoginSelfTest {
 
         // SMS reuses the CSRF session, never replays a submitted code, and hides raw provider text.
         ScriptedProtocol.reset([qr, json(#"{"message":"success","data":{"retry_time":60}}"#),
-            json(#"{"message":"error","data":{"error_code":1102,"description":"provider-raw-secret"}}"#)])
+            json(#"{"message":"error","data":{"error_code":1102,"description":"provider-raw-secret"}}"#),
+            json(#"{"message":"error","data":{"error_code":1103}}"#)])
         session = login()
         let sent = try await session.send("13800138000"); try check(sent.masked == "138****8000", "sms-masked"); pass()
         try await fails("sms-wrong-code", containing: "验证码有误") { _ = try await session.verify("123456") }; pass()
-        try await fails("sms-no-replay", containing: "重新获取验证码") { _ = try await session.verify("123456") }; pass()
+        try await fails("sms-same-code-not-replayed", containing: "已提交过") { _ = try await session.verify("123456") }; pass()
+        try await fails("sms-other-code-once", containing: "已失效") { _ = try await session.verify("654321") }; pass()
+        try await fails("sms-ended-session", containing: "重新获取验证码") { _ = try await session.verify("111111") }; pass()
         try await fails("sms-cooldown", containing: "冷却") { _ = try await session.send("13800138000") }; pass()
-        try check(ScriptedProtocol.requests.count == 3, "sms-request-count"); pass()
+        try check(ScriptedProtocol.requests.count == 4, "sms-request-count"); pass()
         try check(ScriptedProtocol.requests[1].httpMethod == "POST" && ScriptedProtocol.bodies[1].contains("mobile=\(WebLoginRules.mix("+86 13800138000"))"), "sms-form"); pass()
         try check(ScriptedProtocol.requests[1].value(forHTTPHeaderField: "x-tt-passport-csrf-token") == "offline-csrf", "sms-csrf"); pass()
         try check(ScriptedProtocol.requests[2].url!.path == "/passport/web/sms_login", "sms-login-path"); pass()
@@ -113,7 +119,71 @@ struct WebLoginSelfTest {
         session = login()
         try await fails("sms-expired", containing: "会话已失效") { _ = try await session.send("13800138000") }; pass()
 
-        print("PASS web login: \(cases) offline cases (phone rules, mix encoding, error codes, QR decode/expiry, redirects, CSRF, one-shot SMS codes)")
+        // App passport SMS channel.
+        func appLogin() -> AppPhoneLogin {
+            let configuration = URLSessionConfiguration.ephemeral
+            configuration.protocolClasses = [ScriptedProtocol.self]
+            return AppPhoneLogin(base: URL(string: "https://passport.test/")!, profile: ["device_type": "OfflinePhone"], configuration: configuration) { base, query, body, device in
+                precondition(device["device_id"] == AppPhoneLogin.deviceID && device["iid"] == AppPhoneLogin.installID && device["version_code"] == "73932")
+                var components = URLComponents(string: base)!
+                components.queryItems = query.map { URLQueryItem(name: $0[0], value: $0[1]) }
+                return (components.url!, ["x-gorgon": "signed"])
+            }
+        }
+        let codeSent = json(#"{"message":"success","data":{"mobile":"138******00","retry_time":45,"mobile_ticket":"tk1"}}"#, ["Set-Cookie": "passport_csrf_token=x; Path=/"])
+        let error = { (code: Int) in json("{\"message\":\"error\",\"data\":{\"error_code\":\(code),\"description\":\"raw-secret\"}}") }
+        ScriptedProtocol.reset([codeSent, json(#"{"message":"success","data":{}}"#, ["Set-Cookie": "sessionid=abc; Path=/"])])
+        var phone = appLogin()
+        let phoneSent = try await phone.send("138 0013-8000")
+        try check(phoneSent.masked == "138****8000" && phoneSent.retry == 45, "passport-sent"); pass()
+        let sendItems = URLComponents(url: ScriptedProtocol.requests[0].url!, resolvingAgainstBaseURL: false)!.queryItems!
+        func item(_ items: [URLQueryItem], _ name: String) -> String? { items.first { $0.name == name }?.value }
+        try check(ScriptedProtocol.requests[0].httpMethod == "GET" && ScriptedProtocol.requests[0].url!.path == "/passport/mobile/send_code/v1", "passport-send-path"); pass()
+        try check(item(sendItems, "mobile") == "13800138000" && item(sendItems, "type") == "24", "passport-mainland-number"); pass()
+        try check(item(sendItems, "device_id") == nil && item(sendItems, "iid") == nil, "passport-no-device-in-query"); pass()
+        try await fails("passport-cooldown", containing: "冷却") { _ = try await phone.send("13800138000") }; pass()
+        let phoneCredentials = try await phone.verify("123456")
+        try check(phoneCredentials.cookie.contains("sessionid=abc") && phoneCredentials.deviceID == AppPhoneLogin.deviceID && phoneCredentials.installID == AppPhoneLogin.installID, "passport-credentials"); pass()
+        try check(ScriptedProtocol.requests.count == 2 && ScriptedProtocol.requests[1].httpMethod == "POST" && ScriptedProtocol.requests[1].url!.path == "/passport/mobile/sms_login", "passport-first-endpoint"); pass()
+        try check(ScriptedProtocol.bodies[1].contains("code=123456") && ScriptedProtocol.bodies[1].contains("mobile_ticket=tk1"), "passport-form"); pass()
+        try check(ScriptedProtocol.requests[1].value(forHTTPHeaderField: "Cookie") == nil, "passport-no-cookie-replay"); pass()
+        try check(ScriptedProtocol.requests[1].value(forHTTPHeaderField: "Content-Type")?.hasPrefix("application/x-www-form-urlencoded") == true, "passport-form-type"); pass()
+        // A slider request points to the official page and never shows raw provider text.
+        ScriptedProtocol.reset([json(#"{"message":"error","data":{"error_code":1105,"verify_center_decision_conf":"{}","description":"raw-secret"}}"#)])
+        phone = appLogin()
+        do { _ = try await phone.send("13800138000"); throw HGError.message("slider-not-reported") }
+        catch let failure as WebLoginFailure { try check(failure.needsWebsite && !failure.canRetryCode && failure.message.contains("滑块") && !failure.message.contains("raw-secret"), "passport-slider"); pass() }
+        ScriptedProtocol.reset([json(#"{"message":"error","data":{"error_code":1101,"captcha":"image-data"}}"#)])
+        phone = appLogin()
+        do { _ = try await phone.send("13800138000"); throw HGError.message("captcha-not-reported") }
+        catch let failure as WebLoginFailure { try check(failure.needsWebsite && !failure.message.contains("image-data"), "passport-captcha"); pass() }
+        // error_code 1 moves on with the latest ticket; all endpoints expired ends the attempt.
+        ScriptedProtocol.reset([codeSent, json(#"{"message":"error","data":{"error_code":1,"mobile_ticket":"tk2"}}"#), json(#"{"message":"success","data":{}}"#, ["Set-Cookie": "sessionid=abc; Path=/"])])
+        phone = appLogin(); _ = try await phone.send("13800138000"); _ = try await phone.verify("123456")
+        try check(ScriptedProtocol.requests[2].url!.path == "/passport/mobile/sms_login_only" && ScriptedProtocol.bodies[2].contains("mobile_ticket=tk2"), "passport-next-endpoint-latest-ticket"); pass()
+        ScriptedProtocol.reset([codeSent, error(1), error(1), error(1), error(1), error(1)])
+        phone = appLogin(); _ = try await phone.send("13800138000")
+        try await fails("passport-all-expired", containing: "会话已失效") { _ = try await phone.verify("123456") }; pass()
+        try check(ScriptedProtocol.requests.count == 6, "passport-five-endpoints"); pass()
+        try await fails("passport-attempt-ended", containing: "重新获取") { _ = try await phone.verify("654321") }; pass()
+        // A wrong code stops at once, allows only a different code; 1203 ends the attempt.
+        ScriptedProtocol.reset([codeSent, error(1202), json(#"{"message":"success","data":{}}"#, ["Set-Cookie": "sessionid=abc; Path=/"])])
+        phone = appLogin(); _ = try await phone.send("13800138000")
+        try await fails("passport-wrong-code", containing: "验证码有误") { _ = try await phone.verify("123456") }; pass()
+        try check(ScriptedProtocol.requests.count == 2, "passport-wrong-code-stops"); pass()
+        try await fails("passport-same-code", containing: "已提交过") { _ = try await phone.verify("123456") }; pass()
+        _ = try await phone.verify("654321"); pass()
+        ScriptedProtocol.reset([codeSent, error(1203)])
+        phone = appLogin(); _ = try await phone.send("13800138000")
+        try await fails("passport-too-many", containing: "错误次数过多") { _ = try await phone.verify("123456") }; pass()
+        try await fails("passport-too-many-ended", containing: "重新获取") { _ = try await phone.verify("654321") }; pass()
+        // A redirect carrying the code is not followed.
+        ScriptedProtocol.reset([codeSent, ScriptedProtocol.Reply(status: 302, headers: ["Location": "https://elsewhere.test/steal"], body: "")])
+        phone = appLogin(); _ = try await phone.send("13800138000")
+        try await fails("passport-redirect", containing: "HTTP 302") { _ = try await phone.verify("123456") }; pass()
+        try check(!ScriptedProtocol.requests.contains { $0.url?.host == "elsewhere.test" }, "passport-no-redirect-request"); pass()
+
+        print("PASS web login: \(cases) offline cases (phone rules, mix encoding, error codes, QR decode/expiry, redirects, CSRF, one-shot SMS codes, App passport channel)")
     }
 }
 

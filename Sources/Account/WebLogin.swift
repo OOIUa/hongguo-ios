@@ -2,6 +2,15 @@
 // Ported from hongguo-android WebLogin.kt / PhoneLogin.kt (adapted from tsukiyo-zero/hongguoTV 34c7930).
 import Foundation
 
+/// A failure the website reported. `canRetryCode`: this code was definitely rejected, so the user may type a different
+/// one in the same session. `needsWebsite`: the platform asks for a verification only the official page can show.
+struct WebLoginFailure: LocalizedError {
+    let message: String
+    var canRetryCode = false
+    var needsWebsite = false
+    var errorDescription: String? { message }
+}
+
 /// Pure rules shared by QR and SMS login; kept separate so they run in offline tests.
 enum WebLoginRules {
     static let maximumQRCharacters = 1024 * 1024
@@ -25,6 +34,12 @@ enum WebLoginRules {
               digits.range(of: "^[0-9]{5,15}$", options: .regularExpression) != nil else { throw HGError.message("请输入有效手机号") }
         return "+\(code) \(digits)"
     }
+    /// Digits of a typed or autofilled number; a pasted +86 prefix is dropped rather than truncating the number.
+    static func phoneDigits(_ raw: String) -> String {
+        let digits = raw.filter { $0.isASCII && $0.isNumber }
+        return String((digits.count > 11 && digits.hasPrefix("86") ? String(digits.dropFirst(2)) : digits).prefix(11))
+    }
+    static func validMainlandPhone(_ digits: String) -> Bool { digits.range(of: "^1[3-9][0-9]{9}$", options: .regularExpression) != nil }
     static func masked(_ mobile: String) -> String {
         let digits = mobile.split(separator: " ", maxSplits: 1).last.map(String.init) ?? ""
         return digits.count >= 7 ? String(digits.prefix(3)) + "****" + String(digits.suffix(4)) : "你的手机"
@@ -34,13 +49,13 @@ enum WebLoginRules {
 
     static func failure(code: Int, needsVerification: Bool) -> String {
         let message: String
-        if needsVerification { message = "红果要求完成滑块验证，请改用扫码登录" }
+        if needsVerification { message = "红果要求完成滑块验证，请到官网登录页面完成" }
         else {
             switch code {
             case 13, 1003: message = "登录会话已失效，请重新扫码或重新获取验证码"
-            case 1102: message = "验证码有误，请重新获取后再试"
+            case 1102: message = "验证码有误，请检查后重新输入"
             case 1103, 1104: message = "验证码已失效，请重新获取后再试"
-            case 1105: message = "红果要求额外验证，请改用扫码登录"
+            case 1105: message = "红果要求额外验证，请到官网登录页面完成"
             case 1106, 1107: message = "请求过于频繁，请稍后再试"
             default: message = "官网登录失败，请稍后重试"
             }
@@ -85,6 +100,7 @@ final class WebLogin {
     private var mobile = ""
     private var codeSent = false
     private var nextSMSAt = Date.distantPast
+    private var submittedCodes = Set<String>()
 
     init(base: URL = WebLogin.base, configuration: URLSessionConfiguration = .ephemeral) {
         self.base = base
@@ -136,6 +152,7 @@ final class WebLogin {
         guard Date() >= nextSMSAt else { throw HGError.message("请等待短信冷却后再试") }
         mobile = try WebLoginRules.phone(number)
         codeSent = false
+        submittedCodes = []
         if !cookies.contains(where: { $0.name == "passport_csrf_token" && live($0) }) { _ = try await qr() }
         let data = try checked(await call("passport/web/send_code/", form: ["mobile": WebLoginRules.mix(mobile), "type": WebLoginRules.mix("24"), "mix_mode": "1", "fixed_mix_mode": "1"]))
         let retry = min(max(ProtocolJSON.integer(data["retry_time"]) == 0 ? 60 : ProtocolJSON.integer(data["retry_time"]), 1), 3600)
@@ -146,9 +163,16 @@ final class WebLogin {
     func verify(_ code: String) async throws -> String {
         guard codeSent else { throw HGError.message("请先重新获取验证码") }
         guard code.range(of: "^[0-9]{4,8}$", options: .regularExpression) != nil else { throw HGError.message("请输入 4—8 位验证码") }
-        // A submitted code is consumed locally even if the response is lost. Never replay it automatically.
+        // Each code is submitted at most once, even if the response is lost; nothing is ever replayed automatically.
+        // Only a definite rejection (1102) lets the user type a different code in this session.
+        guard submittedCodes.insert(code).inserted else { throw WebLoginFailure(message: "这个验证码已提交过，请输入新的验证码", canRetryCode: true) }
         codeSent = false
-        _ = try checked(await call("passport/web/sms_login/", form: ["mobile": WebLoginRules.mix(mobile), "code": WebLoginRules.mix(code), "login_only": "true", "mix_mode": "1", "fixed_mix_mode": "1"]))
+        do {
+            _ = try checked(await call("passport/web/sms_login/", form: ["mobile": WebLoginRules.mix(mobile), "code": WebLoginRules.mix(code), "login_only": "true", "mix_mode": "1", "fixed_mix_mode": "1"]))
+        } catch let failure as WebLoginFailure {
+            codeSent = failure.canRetryCode
+            throw failure
+        }
         return try await credentials()
     }
 
@@ -230,12 +254,178 @@ final class WebLogin {
         guard let data = reply["data"] as? [String: Any] else { throw HGError.message("官网登录返回格式异常") }
         guard ProtocolJSON.text(reply["message"]) == "success" else {
             let code = data["error_code"] == nil ? -1 : ProtocolJSON.integer(data["error_code"])
-            throw HGError.message(WebLoginRules.failure(code: code, needsVerification: data["verify_center_decision_conf"] != nil))
+            let verification = data["verify_center_decision_conf"] != nil
+            let needsWebsite = verification || code == 1105
+            throw WebLoginFailure(message: WebLoginRules.failure(code: code, needsVerification: verification),
+                                  canRetryCode: code == 1102 && !needsWebsite, needsWebsite: needsWebsite)
         }
         return data
     }
 
     static let userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36"
+}
+
+/// The account session an App passport SMS login produced, bound to the device it was signed with.
+struct AppPhoneCredentials: Sendable {
+    let cookie: String
+    let deviceID: String
+    let installID: String
+}
+
+/// SMS login over the official App's passport channel; the website channel now demands a slider before sending.
+/// Adapted from tsukiyo-zero/hongguoTV PhoneLogin.kt at f22bb3f (2026-11-03, TV 0.1.17–0.1.19) through hongguo-android.
+/// One instance is one attempt. Nothing here solves a platform verification: a slider request is reported as
+/// `needsWebsite` so the user can pass it on the official page.
+///
+/// The verification tries the passport's login endpoints in order with the same code, because the endpoint that accepts
+/// a signed-out session is not declared anywhere. It stops at the first definite answer. The user can never submit the
+/// same code twice in one attempt, and nothing is resent automatically.
+@MainActor
+final class AppPhoneLogin {
+    typealias Signer = @Sendable (String, [[String]], Data?, [String: String]) async throws -> (url: URL, headers: [String: String])
+    nonisolated static let passport = URL(string: "https://security.snssdk.com/")!
+    /// The official App's SMS login uses this device from its table; a newly registered one is answered with 2046.
+    nonisolated static let deviceID = "1905892595378490", installID = "1905892595382586"
+    /// `validate_code` is for signed-in phone checks and answers a signed-out session with error_code 1, so it is last.
+    private static let verifyAttempts: [(path: String, form: Bool)] = [("passport/mobile/sms_login/", true), ("passport/mobile/sms_login_only/", true),
+        ("passport/mobile/sms_login_continue/", true), ("passport/mobile/validate_code/v1/", false), ("passport/mobile/validate_code/v1/", true)]
+    private static let codeType = "24", verifyField = "verify_center_decision_conf"
+    private let base: URL
+    private let profile: [String: String]
+    private let sign: Signer
+    private let session: URLSession
+    private var cookies: [String: String] = [:]
+    private var submittedCodes = Set<String>()
+    private var mobile = ""
+    private var ticket = ""
+    private var codeSent = false
+    private var cancelled = false
+    private var nextSMSAt = Date.distantPast
+
+    init(base: URL = AppPhoneLogin.passport, profile: [String: String], configuration: URLSessionConfiguration = .ephemeral, sign: @escaping Signer) {
+        self.base = base; self.profile = profile; self.sign = sign
+        configuration.httpCookieStorage = nil
+        configuration.httpShouldSetCookies = false
+        configuration.urlCache = nil
+        configuration.timeoutIntervalForRequest = 20
+        session = URLSession(configuration: configuration, delegate: RedirectBlocker(), delegateQueue: nil)
+    }
+    deinit { session.invalidateAndCancel() }
+
+    func cancel() { cancelled = true; codeSent = false; session.invalidateAndCancel() }
+
+    func send(_ number: String) async throws -> (masked: String, retry: Int) {
+        guard Date() >= nextSMSAt else { throw HGError.message("请等待短信冷却后再试") }
+        let formatted = try WebLoginRules.phone(number)
+        mobile = formatted.hasPrefix("+86 ") ? String(formatted.dropFirst(4)) : formatted
+        codeSent = false; ticket = ""; cookies = [:]; submittedCodes = []
+        let reply = try await call("passport/mobile/send_code/v1/", params: ["mobile": mobile, "type": Self.codeType], form: false)
+        let data = ProtocolJSON.dictionary(reply["data"])
+        guard data[Self.verifyField] == nil, ProtocolJSON.text(reply["message"]) == "success" else { throw Self.failure(data) }
+        ticket = ProtocolJSON.text(data["mobile_ticket"])
+        let raw = ProtocolJSON.integer(data["retry_time"]), retry = min(max(raw == 0 ? 60 : raw, 1), 3600)
+        nextSMSAt = Date().addingTimeInterval(TimeInterval(retry))
+        codeSent = true
+        return (WebLoginRules.masked(formatted), retry)
+    }
+
+    func verify(_ code: String) async throws -> AppPhoneCredentials {
+        guard codeSent else { throw HGError.message("请先重新获取验证码") }
+        guard code.range(of: "^[0-9]{4,8}$", options: .regularExpression) != nil else { throw HGError.message("请输入 4—8 位验证码") }
+        guard submittedCodes.insert(code).inserted else { throw WebLoginFailure(message: "这个验证码已提交过，请输入新的验证码", canRetryCode: true) }
+        codeSent = false
+        var sawExpired = false
+        for attempt in Self.verifyAttempts {
+            let reply = try await call(attempt.path, params: ["mobile": mobile, "code": code, "type": Self.codeType, "mobile_ticket": ticket], form: attempt.form)
+            if let header = sessionHeader { return AppPhoneCredentials(cookie: header, deviceID: Self.deviceID, installID: Self.installID) }
+            let data = ProtocolJSON.dictionary(reply["data"])
+            // The passport issues a new ticket after each attempt; later endpoints use the latest one.
+            let fresh = ProtocolJSON.text(data["mobile_ticket"])
+            if !fresh.isEmpty { ticket = fresh }
+            switch ProtocolJSON.integer(data["error_code"]) {
+            case 0: continue
+            // 1: this endpoint does not apply to a signed-out session, so the next one is tried.
+            case 1: sawExpired = true
+            default:
+                let failure = Self.failure(data)
+                codeSent = failure.canRetryCode
+                throw failure
+            }
+        }
+        throw WebLoginFailure(message: sawExpired ? "登录会话已失效，请重新获取验证码" : "登录没有成功，平台没有下发登录态")
+    }
+
+    private var sessionHeader: String? {
+        guard cookies["sessionid"]?.isEmpty == false || cookies["sessionid_ss"]?.isEmpty == false else { return nil }
+        return cookies.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: "; ")
+    }
+
+    /// Raw provider text is never shown.
+    private static func failure(_ data: [String: Any]) -> WebLoginFailure {
+        let code = data["error_code"] == nil ? -1 : ProtocolJSON.integer(data["error_code"])
+        let verification = data[verifyField] != nil, captcha = !ProtocolJSON.text(data["captcha"]).isEmpty
+        let needsWebsite = verification || captcha || code == 1105
+        let message: String
+        if verification { message = "红果要求完成滑块验证，请到官网登录页面完成" }
+        else if captcha { message = "红果要求额外验证，请到官网登录页面完成" }
+        else {
+            switch code {
+            case 1102, 1202: message = "验证码有误，请检查后重新输入"
+            case 1103, 1104: message = "验证码已失效，请重新获取后再试"
+            case 1105: message = "红果要求额外验证，请到官网登录页面完成"
+            case 1106, 1107: message = "请求过于频繁，请稍后再试"
+            case 1203: message = "错误次数过多或验证码已过期，请重新获取验证码"
+            default: message = "手机号登录失败，请稍后重试"
+            }
+        }
+        return WebLoginFailure(message: "\(message)（错误码 \(code)）", canRetryCode: !needsWebsite && (code == 1102 || code == 1202), needsWebsite: needsWebsite)
+    }
+
+    private func call(_ path: String, params: [String: String], form: Bool) async throws -> [String: Any] {
+        try Task.checkCancellation()
+        guard !cancelled else { throw CancellationError() }
+        var device = profile
+        device["device_id"] = Self.deviceID; device["iid"] = Self.installID
+        for key in ["version_code", "manifest_version_code", "update_version_code", "pv_player"] { device[key] = "73932" }
+        device["version_name"] = "7.3.9.32"
+        device["ts"] = String(Int64(Date().timeIntervalSince1970))
+        let passport = ["aid": "8662", "app_name": "novelread", "device_platform": "android"].merging(params.filter { !$0.value.isEmpty }) { _, new in new }
+        let body = form ? Data(passport.sorted { $0.key < $1.key }.map { "\(Self.encode($0.key))=\(Self.encode($0.value))" }.joined(separator: "&").utf8) : nil
+        // The official App identifies the device outside the query; sending these two here is judged an abnormal device.
+        var query = device.filter { $0.key != "device_id" && $0.key != "iid" }
+        if !form { query.merge(passport) { _, new in new } }
+        let address = base.appendingPathComponent(path).absoluteString
+        let signed = try await sign(path.hasSuffix("/") && !address.hasSuffix("/") ? address + "/" : address, query.sorted { $0.key < $1.key }.map { [$0.key, $0.value] }, body, device)
+        var request = URLRequest(url: signed.url)
+        request.httpShouldHandleCookies = false
+        request.httpMethod = form ? "POST" : "GET"
+        request.httpBody = body
+        for (key, value) in signed.headers { request.setValue(value, forHTTPHeaderField: key) }
+        request.setValue(form
+            ? "com.phoenix.read/71332 (Linux; U; Android 16; zh_CN; 25053RT47C; Build/BP2A.250605.031.A3; Cronet/TTNetVersion:04657795 2026-01-23 QuicVersion:c67e9834 2025-09-08)"
+            : "com.phoenix.read/72232 (Linux; U; Android 16; zh_CN; 25053RT47C; Build/BP2A.250605.031.A3)", forHTTPHeaderField: "User-Agent")
+        request.setValue("application/json; charset=utf-8,application/x-protobuf", forHTTPHeaderField: "Accept")
+        for (key, value) in ["x-tt-request-tag": "t=0;n=0", "sdk-version": "2", "passport-sdk-version": "50561", "x-xs-from-web": "0"] { request.setValue(value, forHTTPHeaderField: key) }
+        if form {
+            request.setValue("3.7.2.cn", forHTTPHeaderField: "x-vc-bdturing-sdk-version")
+            request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        }
+        // Cookies are deliberately not sent back: replaying send_code's cookies on sms_login is answered with 2046.
+        let (bytes, response) = try await session.data(for: request)
+        guard !cancelled else { throw CancellationError() }
+        guard let http = response as? HTTPURLResponse else { throw HGError.message("手机号登录返回格式异常") }
+        guard (200...299).contains(http.statusCode) else { throw HGError.message("账号请求失败（HTTP \(http.statusCode)）") }
+        guard bytes.count <= 2 * 1024 * 1024 else { throw HGError.message("账号接口响应过大") }
+        let fields = http.allHeaderFields.reduce(into: [String: String]()) { result, item in
+            if let key = item.key as? String, let value = item.value as? String { result[key] = value }
+        }
+        for cookie in HTTPCookie.cookies(withResponseHeaderFields: fields, for: signed.url) where !cookie.value.isEmpty { cookies[cookie.name] = cookie.value }
+        do { return try ProtocolJSON.object(bytes) } catch { throw HGError.message("手机号登录返回格式异常") }
+    }
+
+    private static func encode(_ value: String) -> String {
+        value.addingPercentEncoding(withAllowedCharacters: CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.~")) ?? ""
+    }
 }
 
 /// Redirects are inspected by `WebLogin` so cookies are captured and cross-origin hops are refused.

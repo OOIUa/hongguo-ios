@@ -57,17 +57,16 @@ import JavaScriptCore
         precondition(anonymous.url!.absoluteString.hasPrefix("https://api5-normal-sinfonlinea.fqnovel.com/reading/bookapi/bookmall/tab/v1/?") && anonymous.httpMethod == "GET")
         precondition(anonymous.value(forHTTPHeaderField: "Cookie") == nil && value(anonymousQuery, "device_id") == nil)
         precondition(value(anonymousQuery, "tab_type") == "16" && value(anonymousQuery, "client_req_type") == "1" && value(anonymousQuery, "session_id") == nil)
-        let account = GuessAccount(cookie: "sessionid=offline; install_id=9999999999999999998", deviceID: "9999999999999999999",
-                                   installID: "9999999999999999998", device: ["device_type": "OfflinePhone", "cdid": "not-forwarded"])
+        let account = GuessAccount(cookie: "sessionid=offline", device: ["device_type": "OfflinePhone", "cdid": "not-forwarded"])
         let signedIn = try GuessFeed.request(account: account, session: "srv", offset: 2, rticket: 1)
         let signedQuery = URLComponents(url: signedIn.url!, resolvingAgainstBaseURL: false)!.queryItems!
         precondition(signedIn.value(forHTTPHeaderField: "Cookie") == account.cookie && signedIn.value(forHTTPHeaderField: "X-Gorgon") == nil)
-        precondition(value(signedQuery, "device_id") == "9999999999999999999" && value(signedQuery, "iid") == "9999999999999999998")
+        precondition(value(signedQuery, "device_id") == nil && value(signedQuery, "iid") == nil, "device_id/iid with an account cookie is answered with 110")
         precondition(value(signedQuery, "device_type") == "OfflinePhone" && value(signedQuery, "cdid") == nil)
         precondition(value(signedQuery, "session_id") == "srv" && value(signedQuery, "offset") == "2" && value(signedQuery, "client_req_type") == "2")
-        precondition((try? GuessFeed.request(account: GuessAccount(cookie: "sessionid=x", deviceID: "", installID: "", device: [:]), session: "", offset: 0)) == nil)
         let feed = try GuessFeed.parse(ProtocolJSON.object(Data(#"{"code":0,"data":{"tab_item":[{"tab_type":3},{"tab_type":16,"session_id":"srv","cell_data":[{"cell_name":"猜你喜欢","cell_data":[{"video_data":[{"video_detail":{"series_id":7698294694886788121,"series_title":"测试甲","series_cover":"https:\/\/p3.example.invalid\/a.jpg","series_intro":"简介","episode_cnt":80}},{"book_id":"7697622096326708286","book_name":"测试乙","cover":"https://p3.example.invalid/b.jpg"},{"series_id":"7698294694886788121","series_title":"重复"},{"series_id":"bad","series_title":"无效"}]}]}]}]}}"#.utf8)))
         precondition(feed.dramas.map(\.id) == ["7698294694886788121", "7697622096326708286"] && feed.session == "srv")
+        precondition(feed.served >= feed.dramas.count && feed.served > 0)
         precondition(feed.dramas[0].coverURL == "https://p3.example.invalid/a.jpg" && feed.dramas[0].episodeCount == 80)
         precondition((try? GuessFeed.parse(["code": 1])) == nil)
         precondition((try? GuessFeed.parse(["code": 0, "data": ["tab_item": [["tab_type": 16, "session_id": "a\nb"]]]])) == nil)
@@ -87,7 +86,58 @@ import JavaScriptCore
         let once = try await repeating.next(); precondition(once.dramas.count == 1)
         let ended = try await repeating.next()
         precondition(ended.dramas.isEmpty && !ended.hasMore)
-        print("PASS: 猜你喜欢 anonymous/signed-in request, parsing and pager batching.")
+        // A non-zero code moves to the next host from the start; an error thrown by the fetch does not move at all.
+        let feedObject = try ProtocolJSON.object(Data(#"{"code":0,"data":{"tab_item":[{"tab_type":16,"session_id":"fresh"}]}}"#.utf8))
+        var attempts = [URLRequest]()
+        let recovered = try await GuessFeed.batch(account: account, session: "stale", offset: 3) { request in
+            attempts.append(request)
+            return attempts.count < 3 ? ["code": 110] : feedObject
+        }
+        precondition(recovered.restarted && recovered.session == "fresh")
+        precondition(attempts.map { $0.url!.host! } == GuessFeed.hosts && Set(GuessFeed.hosts).count == 3)
+        let staleQuery = URLComponents(url: attempts[0].url!, resolvingAgainstBaseURL: false)!.queryItems!
+        precondition(value(staleQuery, "session_id") == "stale" && value(staleQuery, "offset") == "3")
+        let retryQuery = URLComponents(url: attempts[1].url!, resolvingAgainstBaseURL: false)!.queryItems!
+        precondition(value(retryQuery, "session_id") == nil && value(retryQuery, "offset") == "0" && value(retryQuery, "client_req_type") == "1")
+        precondition(attempts[1].value(forHTTPHeaderField: "Cookie") == account.cookie)
+        let direct = try await GuessFeed.batch(account: nil, session: "srv", offset: 1) { _ in feedObject }
+        precondition(!direct.restarted)
+        var exhausted = 0
+        do {
+            _ = try await GuessFeed.batch(account: nil, session: "", offset: 0) { _ in exhausted += 1; return ["code": 110] }
+            fatalError("Every host answering 110 must be reported")
+        } catch let error as HGError { precondition(exhausted == 3 && error.localizedDescription.contains("110")) }
+        var failures = 0
+        do {
+            _ = try await GuessFeed.batch(account: nil, session: "", offset: 0) { _ in failures += 1; throw HGError.message("HTTP 500") }
+            fatalError("A fetch failure must be reported")
+        } catch is HGError { precondition(failures == 1) }
+        // The server's offset counts rows, so a batch advances it by the rows served.
+        let strideCalls = Calls()
+        let striding = GuessPager(owner: nil) { cursor, offset in
+            strideCalls.values.append((cursor, offset))
+            return GuessBatch(dramas: (0..<3).map { Drama(id: "7400000000000\(offset)\($0)", title: "剧", coverURL: "", summary: "", episodeCount: 1) },
+                              session: "srv", served: offset == 0 ? 3 : 6)
+        }
+        let stridePage = try await striding.next()
+        precondition(strideCalls.values.map(\.1) == [0, 3] && stridePage.nextOffset == 9)
+        // A restarted batch replaces the rejected pagination and shown cards stay filtered out.
+        let restartCalls = Calls()
+        let drama = { (id: Int) in Drama(id: "73000000000000\(id)", title: "剧", coverURL: "", summary: "", episodeCount: 1) }
+        let restarting = GuessPager(owner: nil) { cursor, offset in
+            restartCalls.values.append((cursor, offset))
+            switch restartCalls.values.count {
+            case 1: return GuessBatch(dramas: (0..<6).map(drama), session: "old")
+            case 2: return GuessBatch(dramas: [0, 6, 7, 8, 9, 10, 11].map(drama), session: "", restarted: true)
+            default: return GuessBatch(dramas: [drama(12)], session: "new")
+            }
+        }
+        _ = try await restarting.next()
+        let afterRestart = try await restarting.next()
+        precondition(afterRestart.dramas.count == 6 && afterRestart.nextOffset == 1)
+        _ = try await restarting.next()
+        precondition(restartCalls.values.prefix(3).map(\.0) == ["", "old", ""] && restartCalls.values.prefix(3).map(\.1) == [0, 1, 1])
+        print("PASS: 猜你喜欢 anonymous/signed-in request, parsing, pager batching and host rotation.")
         // video_tab playback model: full GetVideoModelRequest query, object/string model, rejection of unusable replies.
         let identity = RegisteredIdentity(deviceID: "9999999999999999999", installID: "9999999999999999998", cdid: "offline", appDeviceCookie: "")
         let tabURL = DramaAPI.tabVideoURL(identity, episodeID: "7600000000000000001", rticket: 1)
@@ -107,6 +157,30 @@ import JavaScriptCore
         precondition(DramaAPI.tabVideoModel(Data(#"{"code":0,"data":{"video_model_data":{"7600000000000000999":{"video_model":{"video_list":[{}]}}}}}"#.utf8), episodeID: "7600000000000000001") == nil)
         precondition(DramaAPI.tabVideoModel(Data(#"{"code":0,"data":{"video_model_data":{"7600000000000000001":{"video_model":{"video_list":[]}}}}}"#.utf8), episodeID: "7600000000000000001") == nil)
         precondition(DramaAPI.playbackURL(identity, host: DramaAPI.playbackRetryHost, rticket: 1).absoluteString.hasPrefix("https://api5-normal-hl.fqnovel.com/novel/player/multi_video_model/v1/?"))
+        // ByteVC2-only episodes say so; inline rows without encryption metadata may use a fully verified fallback.
+        let trackAPI = DramaAPI(resourceDirectory: resources)
+        let videoRow = { (codec: String, url: String, side: Int) -> [String: Any] in ["codec_type":codec,"vwidth":side,"vheight":side * 16 / 9,"definition":"\(side)p","main_url":url] }
+        do {
+            _ = try await trackAPI.modelTrack(["video_list":[videoRow("bytevc2","https://v1.qznovelvod.com/a.mp4",1080)]])
+            fatalError("A ByteVC2-only episode has no playable track")
+        } catch { precondition(error.localizedDescription.contains("ByteVC2")) }
+        let incompleteModel: [String: Any] = ["video_list":[videoRow("h264","https://v1.qznovelvod.com/nokey.mp4",1080)],"video_id":"v0abc","video_duration":60.0,"fallback_api":"https://vod.snssdk.com/video/fallback"]
+        let spadeSample = "k7wd8lO6G/dhixnESLgG9k2BCvxFtxX+Xrkl8my/EvVBugmCgg=="
+        @Sendable func fallbackReply(_ id: String, _ duration: Double, _ side: Int) -> [String: Any] {
+            var row: [String: Any] = ["codec_type":"h264","vwidth":side,"vheight":side * 16 / 9,"definition":"\(side)p","main_url":"https://v1.qznovelvod.com/keyed.mp4"]
+            row["spade_a"] = spadeSample
+            return ["video_info":["data":["video_id":id,"video_duration":duration,"video_list":["video_1":row]]]]
+        }
+        let verified = try await trackAPI.modelTrack(incompleteModel) { _ in fallbackReply("v0abc", 60.2, 1080) }
+        precondition(verified.url.absoluteString == "https://v1.qznovelvod.com/keyed.mp4" && verified.encrypted)
+        for reply in [fallbackReply("v0other", 60, 1080), fallbackReply("v0abc", 30, 1080), fallbackReply("v0abc", 60, 720)] {
+            let unverified = try? await trackAPI.modelTrack(incompleteModel) { _ in reply }
+            precondition(unverified == nil, "A fallback that fails id, duration or quality must not be used")
+        }
+        var declared = incompleteModel
+        declared["video_list"] = [videoRow("h264","https://v1.qznovelvod.com/nokey.mp4",1080).merging(["encrypt_info":["encrypt":true]]) { $1 }]
+        let declaredTrack = try? await trackAPI.modelTrack(declared) { _ in fatalError("A declared-encrypted row must not read the fallback") }
+        precondition(declaredTrack == nil)
         print("PASS: video_tab playback model request and parsing.")
         print("PASS: 4 original Node signing vectors; exact 20/30-digit IDs; numeric-token parsing; binary/gzip body digest; URL spaces; cancelled query rejects before HTTP.")
     }

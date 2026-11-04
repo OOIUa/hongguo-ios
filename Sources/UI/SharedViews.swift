@@ -76,12 +76,13 @@ struct EmptyStateView: View {
 
 struct LoadMoreView: View {
     @ObservedObject var loader: CatalogLoader
+    /// Retries a failed page; the list requests the others itself while scrolling (`CatalogLoader.itemAppeared`).
     let action: () -> Void
     var body: some View {
         Group {
             if loader.isLoading { ProgressView("正在寻找好故事…").frame(maxWidth: .infinity).padding(20) }
             else if let error = loader.error { FailureView(message: error, retry: action) }
-            else if loader.hasMore { Button("加载更多", action: action).buttonStyle(.bordered).frame(maxWidth: .infinity).padding(.vertical, 8) }
+            else if loader.hasMore { ProgressView().frame(maxWidth: .infinity).padding(20) }
             else if !loader.dramas.isEmpty { Text("已经看到最后一部了").font(.caption).foregroundStyle(.secondary).frame(maxWidth: .infinity).padding(20) }
         }
     }
