@@ -36,6 +36,21 @@ struct DramaPoster: View {
     }
 }
 
+/// Library and account lists use the 剧场 grid: three posters across.
+let threePosterColumns = Array(repeating: GridItem(.flexible(), spacing: 12, alignment: .top), count: 3)
+
+struct LibraryPosterCell: View {
+    let drama: Drama
+    var subtitle: String?
+    @EnvironmentObject private var model: AppModel
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            DramaPoster(drama: drama)
+            if let subtitle { Text(subtitle).font(.caption2).foregroundStyle(model.appearance.accent).lineLimit(1) }
+        }
+    }
+}
+
 struct SearchEntry: View {
     var title = "搜索剧名，发现好故事"
     @EnvironmentObject private var model: AppModel
@@ -131,11 +146,11 @@ struct HeaderIcon: View {
 }
 
 extension View {
-    func appBackground(_ theme: AppTheme) -> some View { self.background(theme.background.ignoresSafeArea()).toolbarBackground(theme.background, for: .navigationBar).toolbarBackground(.visible, for: .navigationBar) }
+    func appBackground(_ theme: ThemeColors) -> some View { self.background(theme.background.ignoresSafeArea()).toolbarBackground(theme.background, for: .navigationBar).toolbarBackground(.visible, for: .navigationBar) }
     /// Pages pushed from 我的 (settings, account) cover the tab bar, like Android's full-screen settings.
     func secondaryPage() -> some View { self.toolbar(.hidden, for: .tabBar) }
     /// Tab roots draw their own header; a zero-height inset keeps scrolled content from showing under the status bar.
-    func tabRoot(_ theme: AppTheme) -> some View {
+    func tabRoot(_ theme: ThemeColors) -> some View {
         self.toolbar(.hidden, for: .navigationBar).safeAreaInset(edge: .top, spacing: 0) { Color.clear.frame(height: 0).background(theme.background) }
     }
 }

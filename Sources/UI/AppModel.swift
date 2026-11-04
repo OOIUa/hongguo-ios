@@ -1,17 +1,60 @@
 import SwiftUI
 import Combine
+import UIKit
 
 enum AppTheme: String, CaseIterable, Identifiable {
     case warm, immersive, cards
     var id: String { rawValue }
     var name: String { switch self { case .warm: return "暖白精修"; case .immersive: return "沉浸暗场"; case .cards: return "内容卡片" } }
-    var subtitle: String { switch self { case .warm: return "温暖留白，轻松发现好故事"; case .immersive: return "深色剧场，一屏一部好剧"; case .cards: return "榜单与卡片，丰富而有序" } }
-    var background: Color { switch self { case .warm: return Color(hex: 0xFCF8F4); case .immersive: return Color(hex: 0x111113); case .cards: return Color(hex: 0xF2F3F5) } }
-    var surface: Color { self == .immersive ? Color(hex: 0x1E1E22) : .white }
-    var ink: Color { self == .immersive ? Color(hex: 0xF8F5F0) : Color(hex: 0x292421) }
-    var muted: Color { self == .immersive ? Color(hex: 0xB3ACAA) : Color(hex: 0x786E67) }
-    var accent: Color { self == .immersive ? Color(hex: 0xFF805F) : Color(hex: 0xC94426) }
-    var soft: Color { self == .immersive ? Color(hex: 0x332421) : Color(hex: 0xF5EDE5) }
+    var subtitle: String { switch self { case .warm: return "温暖留白，轻松发现好故事"; case .immersive: return "竖屏刷剧，一屏一部好剧"; case .cards: return "榜单与卡片，丰富而有序" } }
+    /// The natural mode before the user picks one: 沉浸暗场 is dark, the others light.
+    var defaultDark: Bool { self == .immersive }
+    func colors(dark: Bool) -> ThemeColors { ThemeColors(style: self, dark: dark) }
+}
+
+/// Whether the interface is light or dark, chosen in 设置 and independent of the layout.
+enum AppearanceMode: String, CaseIterable, Identifiable {
+    case system, light, dark
+    var id: String { rawValue }
+    var name: String { switch self { case .system: return "跟随系统"; case .light: return "浅色"; case .dark: return "深色" } }
+}
+
+/// A layout in one mode. Every screen reads its colors from here.
+struct ThemeColors: Equatable {
+    let style: AppTheme
+    let dark: Bool
+    var background: Color {
+        switch (style, dark) {
+        case (.warm, false): return Color(hex: 0xFCF8F4)
+        case (.warm, true): return Color(hex: 0x1A1512)
+        case (.immersive, false): return Color(hex: 0xF6F6F8)
+        case (.immersive, true): return Color(hex: 0x111113)
+        case (.cards, false): return Color(hex: 0xF2F3F5)
+        case (.cards, true): return Color(hex: 0x0F1012)
+        }
+    }
+    var surface: Color {
+        guard dark else { return .white }
+        switch style { case .warm: return Color(hex: 0x241E1A); case .immersive: return Color(hex: 0x1E1E22); case .cards: return Color(hex: 0x1A1B1F) }
+    }
+    var ink: Color {
+        guard dark else { return style == .immersive ? Color(hex: 0x17171B) : Color(hex: 0x292421) }
+        switch style { case .warm: return Color(hex: 0xF5EEE8); case .immersive: return Color(hex: 0xF8F5F0); case .cards: return Color(hex: 0xF2F3F5) }
+    }
+    var muted: Color {
+        guard dark else { return style == .immersive ? Color(hex: 0x62626C) : Color(hex: 0x786E67) }
+        switch style { case .warm: return Color(hex: 0xB8ACA3); case .immersive: return Color(hex: 0xB3ACAA); case .cards: return Color(hex: 0xA5A9B1) }
+    }
+    var accent: Color {
+        guard dark else { return Color(hex: 0xC94426) }
+        switch style { case .warm: return Color(hex: 0xFF9B7A); case .immersive: return Color(hex: 0xFF805F); case .cards: return Color(hex: 0xFF8A80) }
+    }
+    var soft: Color {
+        guard dark else { return style == .immersive ? Color(hex: 0xFBE9E4) : Color(hex: 0xF5EDE5) }
+        switch style { case .warm: return Color(hex: 0x3A241C); case .immersive: return Color(hex: 0x332421); case .cards: return Color(hex: 0x3A1C1A) }
+    }
+    /// Layout checks read as before: `model.appearance == .immersive`.
+    static func == (colors: ThemeColors, style: AppTheme) -> Bool { colors.style == style }
 }
 
 extension Color {
@@ -29,23 +72,54 @@ struct PlaybackRequest: Identifiable {
 @MainActor
 final class AppModel: ObservableObject {
     @Published var theme: AppTheme { didSet { UserDefaults.standard.set(theme.rawValue, forKey: "theme") } }
-    @Published var followSystemDark: Bool { didSet { UserDefaults.standard.set(followSystemDark, forKey: "followSystemDark") } }
+    /// nil until the user picks a mode, so each layout keeps its natural look.
+    @Published var appearanceMode: AppearanceMode? { didSet { UserDefaults.standard.set(appearanceMode?.rawValue, forKey: "appearanceMode") } }
+    /// 沉浸暗场's video feed stays dark in every mode, including its status bar and tab bar.
+    @Published var feedOnScreen = false
     @Published var autoNext: Bool { didSet { UserDefaults.standard.set(autoNext, forKey: "autoNext") } }
     @Published var preloadNext: Bool { didSet { UserDefaults.standard.set(preloadNext, forKey: "preloadNext") } }
     @Published var speed: Float { didSet { UserDefaults.standard.set(speed, forKey: "speed") } }
     @Published var tab = 0
-    @Published var systemDark = false
+    @Published var systemDark = UIScreen.main.traitCollection.userInterfaceStyle == .dark
     @Published var playback: PlaybackRequest?
     @Published var openingDramaID: String?
     @Published var openError: String?
     private var openTask: Task<Void, Never>?
     let library = LibraryStore.shared
-    var appearance: AppTheme { followSystemDark && systemDark ? .immersive : theme }
+    var currentMode: AppearanceMode { appearanceMode ?? (theme.defaultDark ? .dark : .light) }
+    private var modeDark: Bool {
+        switch currentMode { case .system: return systemDark; case .light: return false; case .dark: return true }
+    }
+    private var feedForcesDark: Bool { feedOnScreen && theme == .immersive }
+    var isDark: Bool { modeDark || feedForcesDark }
+    var appearance: ThemeColors { theme.colors(dark: isDark) }
+    /// Applied to the window directly: `preferredColorScheme(nil)` does not reliably return to the system after an explicit value.
+    var windowStyle: UIUserInterfaceStyle { currentMode == .system && !feedForcesDark ? .unspecified : (isDark ? .dark : .light) }
+    private var windowScene: UIWindowScene? { UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first }
+    private var systemAppearanceRegistration: (any UITraitChangeRegistration)?
+
+    func applyWindowStyle() {
+        let style = windowStyle
+        windowScene?.windows.forEach { $0.overrideUserInterfaceStyle = style }
+    }
+    /// The scene's traits ignore the windows' override, so this always reads the real system setting.
+    func refreshSystemAppearance() {
+        systemDark = (windowScene?.traitCollection ?? UIScreen.main.traitCollection).userInterfaceStyle == .dark
+    }
+    func startAppearanceTracking() {
+        refreshSystemAppearance()
+        applyWindowStyle()
+        guard systemAppearanceRegistration == nil, let windowScene else { return }
+        systemAppearanceRegistration = windowScene.registerForTraitChanges([UITraitUserInterfaceStyle.self]) { [weak self] (_: UIWindowScene, _: UITraitCollection) in
+            self?.refreshSystemAppearance()
+        }
+    }
 
     init() {
         let defaults = UserDefaults.standard
         theme = AppTheme(rawValue: defaults.string(forKey: "theme") ?? "warm") ?? .warm
-        followSystemDark = defaults.bool(forKey: "followSystemDark")
+        // The old switch 深色模式时自动切换 meant following the system.
+        appearanceMode = defaults.string(forKey: "appearanceMode").flatMap(AppearanceMode.init) ?? (defaults.bool(forKey: "followSystemDark") ? .system : nil)
         autoNext = defaults.object(forKey: "autoNext") as? Bool ?? true
         preloadNext = defaults.object(forKey: "preloadNext") as? Bool ?? false
         let saved = defaults.float(forKey: "speed")

@@ -30,6 +30,7 @@ private struct AccountSnapshot: Codable {
     var history: [LibraryEntry]
     var reservations: [CloudReservation]
     var pendingProgress: [CloudProgressUpload]?
+    var likes: [Drama]?
 }
 
 private struct CloudProgressUpload: Codable {
@@ -128,6 +129,8 @@ final class AccountService: ObservableObject {
     @Published private(set) var favorites: [Drama] = []
     @Published private(set) var history: [LibraryEntry] = []
     @Published private(set) var reservations: [CloudReservation] = []
+    @Published private(set) var likes: [Drama] = []
+    @Published private(set) var stats: AccountStats?
     @Published private(set) var listErrors: [String] = []
     @Published private(set) var pendingFavorites = Set<String>()
     @Published var progressUploadsEnabled = UserDefaults.standard.bool(forKey: "account.progressUploadsEnabled") {
@@ -137,7 +140,7 @@ final class AccountService: ObservableObject {
         }
     }
     private var credentials: AccountCredentials?
-    private var profileID = ""
+    private(set) var profileID = ""
     private var generation = UUID()
     private var pendingProgress = [String:CloudProgressUpload]()
     private var uploadTask: Task<Void,Never>?
@@ -152,7 +155,7 @@ final class AccountService: ObservableObject {
             if let snapshot = try AccountVault.load() {
                 credentials = snapshot.credentials; profileID = snapshot.profileID; nickname = snapshot.nickname
                 avatarURL = snapshot.avatarURL.flatMap(AccountRules.safeImageURL) ?? ""
-                favorites = snapshot.favorites; history = snapshot.history; reservations = snapshot.reservations
+                favorites = snapshot.favorites; history = snapshot.history; reservations = snapshot.reservations; likes = snapshot.likes ?? []
                 if progressUploadsEnabled { for entry in snapshot.pendingProgress ?? [] { pendingProgress[entry.drama.id] = entry } }
                 state = "登录态待验证"
             }
@@ -174,7 +177,7 @@ final class AccountService: ObservableObject {
         AccountTransport.shared.cancelAndReset()
         cancelUploads(); pendingProgress = [:]
         generation = UUID(); authenticated = false
-        profileID = ""; nickname = ""; avatarURL = ""; favorites = []; history = []; reservations = []; pendingFavorites = []
+        profileID = ""; nickname = ""; avatarURL = ""; favorites = []; history = []; reservations = []; likes = []; stats = nil; pendingFavorites = []
         credentials = AccountCredentials(cookie: cookie, source: source, deviceID: deviceID, installID: installID)
         await verify()
     }
@@ -244,7 +247,7 @@ final class AccountService: ObservableObject {
         AccountTransport.shared.cancelAndReset()
         generation = UUID(); credentials = nil; profileID = ""; nickname = ""; avatarURL = ""
         authenticated = false; busy = false; state = "未登录"
-        favorites = []; history = []; reservations = []; listErrors = []; pendingFavorites = []
+        favorites = []; history = []; reservations = []; likes = []; stats = nil; listErrors = []; pendingFavorites = []
         do { try AccountVault.clear(); message = nil } catch { message = "账号已退出，但本机加密缓存清理失败，请重试退出。" }
     }
 
@@ -280,6 +283,17 @@ final class AccountService: ObservableObject {
             if handleExpired(error) { return }
             listErrors.append("账户预约：" + safeMessage(error))
         }
+        do {
+            let result = try await fetchLikes(candidate)
+            guard ticket == generation else { return }
+            likes = result
+        } catch {
+            guard ticket == generation else { return }
+            if handleExpired(error) { return }
+            listErrors.append("账户点赞：" + safeMessage(error))
+        }
+        // Optional counters: a failure simply leaves them out.
+        if let (raw,_) = try? await appJSON(candidate, path: "/reading/user/basic_info/get/v1/"), ticket == generation { stats = AccountRules.stats(raw) }
         if ticket == generation { try? persist(); scheduleUploads(force: false) }
     }
 
@@ -378,6 +392,37 @@ final class AccountService: ObservableObject {
         uploadEpoch = UUID(); uploadTask?.cancel(); uploadTask = nil; uploadWaiting = false
         if !keepForce { forceUploadPending = false }
     }
+    func isReserved(_ id: String) -> Bool { reservations.contains { $0.id == id || $0.id == "reservation:" + id } }
+
+    /// Reserves an upcoming work. The write is followed by a separate read, because code 0 only acknowledges it; a failure is never retried.
+    func reserve(_ work: RelatedWork) async {
+        guard authenticated, let candidate = credentials, !busy, work.upcoming, let itemID = Int64(work.id), itemID > 0 else { return }
+        let ticket = generation; busy = true; message = nil
+        defer { if ticket == generation { busy = false } }
+        var submitted = false
+        func read() async throws -> [CloudReservation] {
+            let online = try await fetchReservations(candidate, online: true)
+            let upcoming = try await fetchReservations(candidate, online: false)
+            return online + upcoming
+        }
+        do {
+            let before = try await read()
+            guard ticket == generation else { return }
+            reservations = before
+            if isReserved(work.id) { message = "已在云端预约"; return }
+            submitted = true
+            _ = try await appJSON(candidate, path: "/reading/bookapi/search/uncover_subscribe/v1/",
+                                  body: ProtocolJSON.data(["item_id":itemID,"item_type":3,"op_type":1,"subscribe_source":0]), gzip: true)
+            let after = try await read()
+            guard ticket == generation else { return }
+            reservations = after; try? persist()
+            message = isReserved(work.id) ? "已确认云端预约成功" : "云端未确认本次预约，请稍后刷新核对；不会自动重试"
+        } catch {
+            guard ticket == generation else { return }
+            if !handleExpired(error) { message = submitted ? "预约结果不确定，请稍后刷新核对；不会自动重试" : safeMessage(error) }
+        }
+    }
+
     func toggleFavorite(_ drama: Drama) async {
         guard authenticated, let candidate = credentials, !busy else { return }
         guard !pendingFavorites.contains(drama.id) else { await refresh(); return }
@@ -429,7 +474,8 @@ final class AccountService: ObservableObject {
         return (AccountRules.avatarURL(data), AccountRules.displayName(data))
     }
 
-    private func appJSON(_ candidate: AccountCredentials, path: String, params: [String:String] = [:], body: Data? = nil) async throws -> ([String:Any], HTTPURLResponse) {
+    private func appJSON(_ candidate: AccountCredentials, path: String, params: [String:String] = [:], body plainBody: Data? = nil, gzip: Bool = false) async throws -> ([String:Any], HTTPURLResponse) {
+        let body = gzip ? try plainBody.map(HGCrypto.gzip) : plainBody
         let ticket = generation
         try Task.checkCancellation()
         var device = PlaybackRegistration.deviceProfile.merging(candidate.device) { _,new in new }
@@ -452,6 +498,7 @@ final class AccountService: ObservableObject {
         if body != nil { request.setValue("3.7.2.cn",forHTTPHeaderField:"x-vc-bdturing-sdk-version") }
         request.setValue(appCookie(candidate), forHTTPHeaderField: "Cookie")
         if body != nil { request.setValue("application/json; charset=utf-8", forHTTPHeaderField: "Content-Type") }
+        if gzip { request.setValue("gzip", forHTTPHeaderField: "Content-Encoding") }
         let (bytes,response) = try await session.data(for: request)
         try Task.checkCancellation()
         guard ticket == generation else { throw CancellationError() }
@@ -476,6 +523,33 @@ final class AccountService: ObservableObject {
         guard rows.isEmpty || !result.isEmpty else { throw HGError.message("账户收藏条目格式发生变化") }
         return unique(result)
     }
+    /// The endpoint intermittently answers with an empty body, so one read is repeated once.
+    private func fetchLikes(_ candidate: AccountCredentials) async throws -> [Drama] {
+        let params = ["count":"50","object_type_list":"6,15,10","offset":"0","action_type":"3"]
+        let liked: [Drama]
+        do { liked = AccountRules.likes(try await appJSON(candidate, path: "/reading/ugc/action/mget/v1/", params: params).0) }
+        catch let failure as AccountFailure where failure.expired { throw failure }
+        catch is CancellationError { throw CancellationError() }
+        catch { liked = AccountRules.likes(try await appJSON(candidate, path: "/reading/ugc/action/mget/v1/", params: params).0) }
+        guard !liked.isEmpty else { return liked }
+        // The like list's video title is often the synopsis, so names come from the detail batch; a failure keeps the list.
+        var mapped = [String:Drama]()
+        do {
+            let (metadata,_) = try await appJSON(candidate, path: "/reading/bookapi/multi-detail/v1/", params: ["book_id":liked.map(\.id).joined(separator: ","),"book_type":"2"])
+            for row in ProtocolJSON.array(metadata["data"]).map({ ProtocolJSON.dictionary($0) }) { if let item = drama(row: row, video: row) { mapped[item.id] = item } }
+        } catch let failure as AccountFailure where failure.expired { throw failure }
+        catch is CancellationError { throw CancellationError() }
+        catch { }
+        return liked.map { mapped[$0.id] ?? $0 }
+    }
+
+    /// Watch records add works the progress list leaves out; a failure there keeps the progress list.
+    private func fetchRecords(_ candidate: AccountCredentials) async -> [LibraryEntry] {
+        guard let (raw,_) = try? await appJSON(candidate, path: "/reading/bookapi/read_history/list/v1/", params: ["book_type":"2","limit":"0","offset":"0",
+            "last_min_read_timestamp_ms":"0","full_field":"true","is_first_load":"true","query_soft_deleted":"false"]) else { return [] }
+        return (try? AccountRules.readHistory(raw)) ?? []
+    }
+
     private func fetchHistory(_ candidate: AccountCredentials) async throws -> [LibraryEntry] {
         let (raw,_) = try await appJSON(candidate, path: "/reading/bookapi/read_progress/list/v1/", params: ["book_types":"2","limit":"50"])
         let data = ProtocolJSON.dictionary(raw["data"])
@@ -488,6 +562,10 @@ final class AccountService: ObservableObject {
             return LibraryEntry(drama: drama, episodeID: episode, episodeIndex: max(1, ProtocolJSON.integer(row["vid_index"])), position: max(0, (Double(ProtocolJSON.text(row["current_play_time"])) ?? 0) / 1000), updatedAt: Date(timeIntervalSince1970: stamp))
         }
         guard rows.isEmpty || !result.isEmpty else { throw HGError.message("账户历史条目格式发生变化") }
+        for record in await fetchRecords(candidate) {
+            if let index = result.firstIndex(where: { $0.id == record.id }) { if record.updatedAt > result[index].updatedAt { result[index] = record } }
+            else { result.append(record) }
+        }
         if !result.isEmpty {
             let (metadata,_) = try await appJSON(candidate, path: "/reading/bookapi/multi-detail/v1/", params: ["book_id":result.map { $0.id }.joined(separator: ","),"book_type":"2"])
             let items = ProtocolJSON.array(metadata["data"]).map { ProtocolJSON.dictionary($0) }
@@ -544,7 +622,7 @@ final class AccountService: ObservableObject {
     }
     private func persist() throws {
         guard let credentials else { return }
-        try AccountVault.save(AccountSnapshot(credentials: credentials, profileID: profileID, nickname: nickname, avatarURL: avatarURL, favorites: favorites, history: history, reservations: reservations, pendingProgress:Array(pendingProgress.values)))
+        try AccountVault.save(AccountSnapshot(credentials: credentials, profileID: profileID, nickname: nickname, avatarURL: avatarURL, favorites: favorites, history: history, reservations: reservations, pendingProgress:Array(pendingProgress.values), likes: likes))
     }
     private func handleExpired(_ error: Error) -> Bool {
         guard let failure = error as? AccountFailure, failure.expired else { return false }
@@ -554,7 +632,7 @@ final class AccountService: ObservableObject {
         cancelUploads(); pendingProgress = [:]
         generation = UUID(); AccountTransport.shared.cancelAndReset()
         credentials = nil; authenticated = false; busy = false; state = "登录已过期"
-        nickname = ""; avatarURL = ""; profileID = ""; favorites = []; history = []; reservations = []; pendingFavorites = []
+        nickname = ""; avatarURL = ""; profileID = ""; favorites = []; history = []; reservations = []; likes = []; stats = nil; pendingFavorites = []
         message = "登录会话已失效，请重新登录。"
         try? AccountVault.clear()
     }

@@ -189,7 +189,15 @@ final class PlayerSession: ObservableObject {
         endHold(); isPlaying = false; position = 0; finished = true
         if recordsLocalHistory { app.library.updatePosition(dramaID: detail.drama.id, episodeID: episode.id, position: 0); app.library.flush() }
         if index + 1 < detail.episodes.count { if app.autoNext { next() } else { endMessage = "本集已播完，上滑观看下一集" } }
-        else { endMessage = "已播完最后一集" }
+        else { endMessage = "已播完最后一集"; Task { await advanceSeason() } }
+    }
+
+    /// After the last episode, continues with the next season when it is on line and autoplay is on.
+    private func advanceSeason() async {
+        guard let works = try? await DramaAPI.shared.related(id: detail.drama.id), let next = RelatedWorks.nextSeason(works), !stopped, finished else { return }
+        if next.upcoming { endMessage = "已播完最后一集，\(next.season)待上线，可在详情页预约" }
+        else if app.autoNext { app.play(next.drama) }
+        else { endMessage = "已播完最后一集，\(next.season)可在详情页观看" }
     }
 
     private func prefetchIfReady() {

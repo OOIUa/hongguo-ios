@@ -20,6 +20,8 @@ actor DramaAPI {
     private var seenByDiscovery: [String: [String]] = [:]
     private var searchCursors: [String: SearchCursor] = [:]
     private var registrationFailedAt: Date?
+    private var relatedCache: [String: [RelatedWork]] = [:]
+    private let suggestionWebID = UUID().uuidString.lowercased()
     private var filterCache: [String: [FilterGroup]] = [:]
 
     private struct SearchCursor { var upstreamOffset = 0; var passback = ""; var searchID = ""; var results = [Drama](); var hasMore = true; var fetchedAt = Date() }
@@ -160,6 +162,41 @@ actor DramaAPI {
             if let result = try? await webDetail(drama) { cacheDetail(result); return result }
             throw error
         }
+    }
+
+    func rank(board: RankBoard, page: Int) async throws -> RankPage {
+        guard (1...100).contains(page) else { throw HGError.message("榜单页码无效") }
+        let data = try await fetch(url: WebsiteCatalog.rankURL(board, page: page), headers: ["User-Agent":WebsiteCatalog.userAgent, "Accept":"text/html,*/*"])
+        return try WebsiteCatalog.parseRank(String(decoding: data, as: UTF8.self), board: board, page: page)
+    }
+
+    func suggestions(query: String) async throws -> [String] {
+        let clean = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clean.isEmpty, clean.count <= 80, let url = WebsiteCatalog.suggestionURL(query: clean, webID: suggestionWebID) else { return [] }
+        return WebsiteCatalog.parseSuggestions(try await request(url: url, body: nil, headers: ["User-Agent":WebsiteCatalog.userAgent, "Accept":"application/json"]))
+    }
+
+    func related(id: String) async throws -> [RelatedWork] {
+        guard ProtocolJSON.identifier(id) != nil else { throw HGError.message("作品编号无效") }
+        if let cached = relatedCache[id] { return cached }
+        var failure: Error = HGError.message("相关作品暂不可用")
+        for host in RelatedWorks.hosts {
+            try Task.checkCancellation()
+            do {
+                let device = RelatedWorks.device()
+                let signed = try await signer.signedRequest(baseURL: "https://" + host + RelatedWorks.path, query: RelatedWorks.query(id: id, device: device), body: nil, device: device)
+                var headers = signed.headers
+                headers["User-Agent"] = "com.phoenix.read/72232 (Linux; U; Android 16; zh_CN; 25053RT47C; Build/BP2A.250605.031.A3)"
+                headers["Accept"] = "application/json; charset=utf-8,application/x-protobuf"
+                headers["x-tt-request-tag"] = "t=0;n=0"; headers["sdk-version"] = "2"; headers["passport-sdk-version"] = "50561"; headers["x-xs-from-web"] = "0"
+                let works = try RelatedWorks.parse(try await request(url: signed.url, body: nil, headers: headers), currentID: id)
+                if relatedCache.count >= 8, let oldest = relatedCache.keys.first { relatedCache.removeValue(forKey: oldest) }
+                relatedCache[id] = works
+                return works
+            } catch is CancellationError { throw CancellationError() }
+            catch { failure = error }
+        }
+        throw failure
     }
 
     func track(episodeID: String) async throws -> VideoTrack {

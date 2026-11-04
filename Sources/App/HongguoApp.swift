@@ -24,11 +24,12 @@ struct RootView: View {
         .overlay { openingOverlay }
         .alert("暂时无法播放", isPresented: openErrorVisible) { Button("好") { model.openError = nil } } message: { Text(model.openError ?? "") }
         .sheet(isPresented: $welcomeVisible, onDismiss: { hasChosenTheme = true }) { themeWelcome }
-        .onAppear { model.systemDark = systemScheme == .dark; if !hasChosenTheme { pendingTheme = model.theme; welcomeVisible = true } }
-        .onChange(of: systemScheme) { _, scheme in model.systemDark = scheme == .dark }
+        .onChange(of: model.windowStyle) { _, _ in model.applyWindowStyle() }
+        .onAppear { model.startAppearanceTracking(); if !hasChosenTheme { pendingTheme = model.theme; welcomeVisible = true } }
+        .onChange(of: systemScheme) { _, _ in model.refreshSystemAppearance() }
         .onChange(of: scenePhase) { _, phase in
             if phase != .active { library.flush() }
-            else { AccountService.shared.resumePendingUploads() }
+            else { model.startAppearanceTracking(); AccountService.shared.resumePendingUploads() }
         }
         .modifier(LaunchUpdatePrompt(deferred: updatePromptDeferred))
         .task { if AccountService.shared.hasCredentials { await AccountService.shared.verify() } }
@@ -46,7 +47,7 @@ struct RootView: View {
         .tint(model.appearance.accent)
         .toolbarBackground(model.appearance.background, for: .tabBar)
         .toolbarBackground(.visible, for: .tabBar)
-        .environment(\.colorScheme, immersive ? .dark : .light)
+        .environment(\.colorScheme, model.isDark ? .dark : .light)
     }
     @ViewBuilder private var openingOverlay: some View {
         if model.openingDramaID != nil { ZStack { Color.black.opacity(0.12).ignoresSafeArea(); ProgressView("正在获取选集…").padding(23).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 19)) } }

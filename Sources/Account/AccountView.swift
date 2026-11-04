@@ -22,8 +22,75 @@ struct AccountView: View {
     @State private var showLogin = false
     @State private var showImport = false
     @State private var showLogout = false
-    @State private var selectedList = 0
     var body: some View {
+        Group {
+            if account.authenticated { signedInPage } else { signedOutList }
+        }
+        .navigationTitle("我的账号").navigationBarTitleDisplayMode(.inline).secondaryPage()
+        .sheet(isPresented: $showLogin) { OfficialLoginSheet { cookie in
+            showLogin = false
+            Task { await account.importCookie(cookie) }
+        } }
+        .sheet(isPresented: $showImport) { CookieImportSheet { cookie, source, device, install in
+            showImport = false
+            Task { await account.importCookie(cookie, source: source, deviceID: device, installID: install) }
+        } }
+        .alert("退出红果账号？", isPresented: $showLogout) {
+            Button("退出", role: .destructive) { account.logout() }
+            Button("取消", role: .cancel) { }
+        } message: { Text("将清理本机账号缓存，不会删除本机收藏与历史，也不会操作官方账号的数据。") }
+        .task { if account.hasCredentials && !account.authenticated { await account.verify() } }
+        .onDisappear { webLogin.cancel() }
+        .refreshable { if account.authenticated { await account.refresh() } else { await account.verify() } }
+    }
+
+    /// Profile, counters and lists fill the page; actions used rarely wait in the menu.
+    private var signedInPage: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                HStack(spacing: 14) {
+                    AccountAvatar(url: account.avatarURL, size: 56) { Image(systemName: "person.crop.circle.fill").font(.system(size: 52)).foregroundStyle(.orange) }
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(account.nickname.isEmpty ? "个人红果账号" : account.nickname).font(.title3.bold()).foregroundStyle(model.appearance.ink).lineLimit(1)
+                        Text(account.profileID.isEmpty ? account.state : "红果号 \(account.profileID)").font(.caption).foregroundStyle(model.appearance.muted).lineLimit(1)
+                    }
+                    Spacer(minLength: 0)
+                    if account.busy { ProgressView() }
+                    accountMenu
+                }
+                if let stats = account.stats, stats.follows != nil || stats.fans != nil || stats.likes != nil {
+                    HStack(spacing: 0) {
+                        statCell("关注", stats.follows); statCell("粉丝", stats.fans); statCell("获赞", stats.likes)
+                    }.padding(.vertical, 12).background(model.appearance.surface, in: RoundedRectangle(cornerRadius: 14))
+                }
+                if let message = account.message { Text(message).font(.footnote).foregroundStyle(model.appearance.muted) }
+                AccountPosterLists()
+                Text("历史每次读取最近 50 部，历史与收藏各缓存最多 200 部，预约分类各读取 20 部，不代表完整云端备份。\n“同步此后观看进度”默认关闭，开启后只同步此后实际播放的集数和位置，本机旧历史不会上传。退出账号不会删除本机收藏与历史。")
+                    .font(.caption2).lineSpacing(3).foregroundStyle(model.appearance.muted)
+            }.padding(.horizontal, 20).padding(.top, 8).padding(.bottom, 24)
+        }.appBackground(model.appearance)
+    }
+
+    private var accountMenu: some View {
+        Menu {
+            Button("刷新账号片单", systemImage: "arrow.clockwise") { Task { await account.refresh() } }.disabled(account.busy)
+            Toggle("同步此后观看进度", systemImage: "arrow.triangle.2.circlepath", isOn: $account.progressUploadsEnabled)
+            Button("重新验证账号", systemImage: "checkmark.shield") { Task { await account.verify() } }.disabled(account.busy)
+            Button("导入本人的登录态", systemImage: "key.horizontal") { showImport = true }.disabled(account.busy)
+            Button("退出账号", systemImage: "rectangle.portrait.and.arrow.right", role: .destructive) { showLogout = true }
+        } label: {
+            Image(systemName: "ellipsis.circle").font(.title2).foregroundStyle(model.appearance.accent).frame(width: 44, height: 44).contentShape(Rectangle())
+        }.accessibilityLabel("账号操作")
+    }
+
+    private func statCell(_ title: String, _ value: Int?) -> some View {
+        VStack(spacing: 3) {
+            Text(value.map(String.init) ?? "–").font(.headline.monospacedDigit()).foregroundStyle(model.appearance.ink)
+            Text(title).font(.caption).foregroundStyle(model.appearance.muted)
+        }.frame(maxWidth: .infinity).accessibilityElement(children: .combine)
+    }
+
+    private var signedOutList: some View {
         List {
             if !account.hasCredentials && !account.authenticated {
                 Section {
@@ -59,81 +126,62 @@ struct AccountView: View {
                 AccountLoginMethods(login: webLogin, disabled: account.busy, openWebsite: { webLogin.cancel(); showLogin = true },
                                     completedPhone: { phone in Task { await account.importCookie(phone.cookie, source: "APP", deviceID: phone.deviceID, installID: phone.installID); webLogin.clearProgress() } }) { cookie in Task { await account.importCookie(cookie); webLogin.clearProgress() } }
             }
-            if account.authenticated {
-                Section {
-                    Toggle("同步此后观看进度", isOn: $account.progressUploadsEnabled)
-                } footer: { Text("默认关闭。开启后，仅同步此后实际播放的集数和位置；本机旧历史不会上传。实际跨设备续播请与官方客户端核对。") }
-                Section {
-                    Picker("账户片单", selection: $selectedList) {
-                        Text("收藏").tag(0); Text("历史").tag(1); Text("预约").tag(2)
-                    }.pickerStyle(.segmented)
-                    if selectedList == 0 {
-                        if account.favorites.isEmpty { empty("暂无已读取的账户收藏") }
-                        ForEach(account.favorites) { drama in
-                            NavigationLink { DetailView(drama: drama) } label: { AccountDramaRow(drama: drama, subtitle: "账号收藏") }
-                        }
-                    } else if selectedList == 1 {
-                        if account.history.isEmpty { empty("暂无已读取的账户历史") }
-                        ForEach(account.history) { entry in
-                            NavigationLink { DetailView(drama: entry.drama, resume: entry) } label: {
-                                AccountDramaRow(drama: entry.drama, subtitle: "第 \(entry.episodeIndex) 集 · \(Int(entry.position) / 60):\(String(format: "%02d", Int(entry.position) % 60))")
-                            }
-                        }
-                    } else {
-                        if account.reservations.isEmpty { empty("暂无已读取的账户预约") }
-                        ForEach(account.reservations) { item in
-                            if item.online {
-                                NavigationLink { DetailView(drama: item.drama) } label: { AccountDramaRow(drama: item.drama, subtitle: "已上线") }
-                            } else { AccountDramaRow(drama: item.drama, subtitle: item.publishText.isEmpty ? "待上线" : item.publishText) }
-                        }
-                    }
-                } header: { Text("红果账号片单") } footer: {
-                    Text("历史每次读取最近 50 部，历史与收藏各缓存最多 200 部，预约分类各读取 20 部。展示已读取的批次，不代表完整云端备份。")
-                }
-                ForEach(account.listErrors, id: \.self) { Text($0).font(.footnote).foregroundStyle(.secondary) }
-                Section {
-                    Button("刷新账号片单", systemImage: "arrow.clockwise") { Task { await account.refresh() } }.disabled(account.busy)
-                }
-            }
             Section {
                 Button("导入本人的登录态", systemImage: "key.horizontal") { showImport = true }.disabled(account.busy)
             } header: { Text("高级选项") } footer: {
                 Text("登录态仅加密保存在这台设备。退出账号不会删除本机收藏与历史，也不会操作官方账号的数据。")
             }
         }
-        .navigationTitle("账号与云片单").navigationBarTitleDisplayMode(.inline).secondaryPage()
-        .sheet(isPresented: $showLogin) { OfficialLoginSheet { cookie in
-            showLogin = false
-            Task { await account.importCookie(cookie) }
-        } }
-        .sheet(isPresented: $showImport) { CookieImportSheet { cookie, source, device, install in
-            showImport = false
-            Task { await account.importCookie(cookie, source: source, deviceID: device, installID: install) }
-        } }
-        .confirmationDialog("退出红果账号？", isPresented: $showLogout, titleVisibility: .visible) {
-            Button("退出并清理本机账号缓存", role: .destructive) { account.logout() }
-        }
-        .task { if account.hasCredentials && !account.authenticated { await account.verify() } }
-        .onDisappear { webLogin.cancel() }
-        .refreshable { if account.authenticated { await account.refresh() } else { await account.verify() } }
     }
-    private func empty(_ text: String) -> some View { Text(text).foregroundStyle(.secondary).frame(maxWidth: .infinity).padding(.vertical, 24) }
 }
 
-private struct AccountDramaRow: View {
-    let drama: Drama
-    let subtitle: String
+/// The account's history, favorites, likes and reservations as three posters across. History comes first.
+struct AccountPosterLists: View {
+    /// 播放历史 shows this one list, without the section picker.
+    var historyOnly = false
+    @EnvironmentObject private var model: AppModel
+    @ObservedObject private var account = AccountService.shared
+    @State private var selected = 1
+    @State private var opening: PosterTarget?
     var body: some View {
-        HStack(spacing: 12) {
-            AsyncImage(url: URL(string: drama.coverURL)) { image in image.resizable().scaledToFill() } placeholder: {
-                Color.orange.opacity(0.12).overlay { Image(systemName: "play.rectangle").foregroundStyle(.orange) }
-            }.frame(width: 54, height: 72).clipShape(RoundedRectangle(cornerRadius: 8))
-            VStack(alignment: .leading, spacing: 6) {
-                Text(drama.title).font(.subheadline.weight(.semibold)).lineLimit(2)
-                Text(subtitle).font(.caption).foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 16) {
+            if !historyOnly {
+                Picker("账户片单", selection: $selected) {
+                    Text("历史").tag(1); Text("收藏").tag(0); Text("点赞").tag(3); Text("预约").tag(2)
+                }.pickerStyle(.segmented)
             }
-        }.padding(.vertical, 3)
+            if selected == 0 {
+                if account.favorites.isEmpty { empty("暂无已读取的账户收藏") }
+                else { posterGrid(account.favorites.map { ($0, nil, nil, true) }) }
+            } else if selected == 1 {
+                if account.history.isEmpty { empty("暂无已读取的账户历史") }
+                else { posterGrid(account.history.map { ($0.drama, "第 \($0.episodeIndex) 集 · \(Int($0.position) / 60):\(String(format: "%02d", Int($0.position) % 60))", $0, true) }) }
+            } else if selected == 3 {
+                if account.likes.isEmpty { empty("暂无已读取的账户点赞") }
+                else { posterGrid(account.likes.map { ($0, nil, nil, true) }) }
+            } else {
+                if account.reservations.isEmpty { empty("暂无已读取的账户预约") }
+                else { posterGrid(account.reservations.map { ($0.drama, $0.online ? "已上线" : ($0.publishText.isEmpty ? "待上线" : $0.publishText), nil, $0.online) }) }
+            }
+        }
+        .navigationDestination(item: $opening) { DetailView(drama: $0.drama, resume: $0.resume) }
     }
+    private func empty(_ text: String) -> some View { Text(text).foregroundStyle(model.appearance.muted).frame(maxWidth: .infinity).padding(.vertical, 24) }
+    /// A reservation not yet on line has nothing to open.
+    private func posterGrid(_ rows: [(drama: Drama, subtitle: String?, resume: LibraryEntry?, opens: Bool)]) -> some View {
+        LazyVGrid(columns: threePosterColumns, spacing: 16) {
+            ForEach(rows, id: \.drama.id) { row in
+                if row.opens {
+                    Button { opening = PosterTarget(drama: row.drama, resume: row.resume) } label: { LibraryPosterCell(drama: row.drama, subtitle: row.subtitle).contentShape(Rectangle()) }.buttonStyle(.plain)
+                } else { LibraryPosterCell(drama: row.drama, subtitle: row.subtitle) }
+            }
+        }
+    }
+}
+
+private struct PosterTarget: Hashable {
+    let drama: Drama
+    let resume: LibraryEntry?
 }
 
 private struct CookieImportSheet: View {

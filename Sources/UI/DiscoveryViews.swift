@@ -7,12 +7,13 @@ struct HomeView: View {
     @StateObject private var loader = CatalogLoader()
     @State private var feed = "guess"
     @State private var guessPager: GuessPager?
-    private let feeds = [("guess", "推荐"), ("recommend", "热度精选"), ("latest", "最新短剧"), ("comic", "漫剧榜单")]
+    // 推荐 is the default channel and sits at the far right; the row opens scrolled to it.
+    private let feeds = [("recommend", "热度精选"), ("latest", "最新短剧"), ("comic", "漫剧榜单"), ("guess", "推荐")]
 
     var body: some View {
         Group {
             if model.appearance == .immersive {
-                ImmersiveFeed(loader: loader, feed: $feed, feeds: [("guess", "推荐"), ("recommend", "热度"), ("latest", "最新"), ("comic", "漫剧")],
+                ImmersiveFeed(loader: loader, feed: $feed, feeds: [("recommend", "热度"), ("latest", "最新"), ("comic", "漫剧"), ("guess", "推荐")],
                               load: { load(reset: $0) }).toolbar(.hidden, for: .navigationBar)
             } else {
                 classicHome.appBackground(model.appearance).tabRoot(model.appearance)
@@ -56,7 +57,7 @@ struct HomeView: View {
     private var feedSelector: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 9) { ForEach(feeds, id: \.0) { value, name in ChoiceChip(title: name, selected: feed == value) { feed = value } } }
-        }
+        }.defaultScrollAnchor(.trailing)
     }
 
     private func featured(_ drama: Drama) -> some View {
@@ -76,7 +77,7 @@ struct HomeView: View {
 
     private var continueWatching: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack { SectionHeading(title: "继续观看", subtitle: "本机"); Button("全部") { model.tab = 2 }.font(.caption).foregroundStyle(model.appearance.muted) }
+            HStack { SectionHeading(title: "继续观看", subtitle: "本机"); NavigationLink("全部") { PlayHistoryView(startLocal: true) }.font(.caption).foregroundStyle(model.appearance.muted) }
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 12) {
                     ForEach(Array(library.history.prefix(8))) { entry in
@@ -159,8 +160,8 @@ private struct ImmersiveFeed: View {
         .onChange(of: loader.dramas.first?.id) { _, _ in current = loader.dramas.first?.id; syncPreview() }
         // Only the visible, foreground feed plays: pushing a page, switching tab, opening the full player or
         // backgrounding releases the preview, and coming back starts the current page again.
-        .onAppear { visible = true; syncPreview() }
-        .onDisappear { visible = false; preview.stop() }
+        .onAppear { visible = true; model.feedOnScreen = true; syncPreview() }
+        .onDisappear { visible = false; model.feedOnScreen = false; model.refreshSystemAppearance(); preview.stop() }
         .onChange(of: model.playback == nil) { _, _ in syncPreview() }
         .onChange(of: scenePhase) { _, _ in syncPreview() }
     }
@@ -341,7 +342,13 @@ struct DiscoverView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 TabHeader(title: model.appearance == .immersive ? "剧场" : "发现")
-                SearchEntry(title: "搜索剧名或关键词")
+                HStack(spacing: 10) {
+                    SearchEntry(title: "搜索剧名或关键词")
+                    NavigationLink { RankView() } label: {
+                        Label("榜单", systemImage: "chart.bar.fill").font(.subheadline.weight(.semibold)).foregroundStyle(model.appearance.accent)
+                            .padding(.horizontal, 12).frame(minHeight: 44).background(model.appearance.surface, in: Capsule())
+                    }.buttonStyle(.plain).accessibilityLabel("榜单")
+                }
                 HStack(spacing: 10) { ForEach(genres, id: \.0) { value, name in ChoiceChip(title: name, selected: genre == value) { genre = value } }; Spacer(minLength: 0) }
                 Button { draft = selection; filtersVisible = true } label: {
                     HStack(spacing: 12) { Image(systemName: "slider.horizontal.3").font(.title3); VStack(alignment: .leading, spacing: 4) { Text("筛选条件").font(.subheadline.weight(.semibold)); Text(selection.isEmpty ? "按题材、排序等条件查找" : "已应用 \(selection.count) 项条件").font(.caption).foregroundStyle(model.appearance.muted) }; Spacer(); Text("筛选").font(.subheadline.weight(.medium)); Image(systemName: "chevron.down").font(.caption) }.foregroundStyle(model.appearance.ink).padding(17).background(model.appearance.surface, in: RoundedRectangle(cornerRadius: 17))
@@ -400,6 +407,7 @@ struct SearchView: View {
     @StateObject private var loader = CatalogLoader()
     @State private var query = ""
     @State private var submitted = ""
+    @State private var suggestions: [String] = []
     @FocusState private var focused: Bool
     var body: some View {
         ScrollView {
@@ -407,6 +415,19 @@ struct SearchView: View {
                 HStack(spacing: 10) {
                     HStack { Image(systemName: "magnifyingglass").foregroundStyle(model.appearance.muted); TextField("搜索剧名或关键词", text: $query).submitLabel(.search).focused($focused).onSubmit(submit); if !query.isEmpty { Button { query = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(model.appearance.muted) }.accessibilityLabel("清空搜索词") } }.padding(13).background(model.appearance.surface, in: RoundedRectangle(cornerRadius: 14))
                     Button("搜索", action: submit).font(.subheadline.bold()).disabled(query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty).buttonStyle(.borderedProminent).tint(model.appearance.accent)
+                }
+                if !suggestions.isEmpty {
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(suggestions, id: \.self) { suggestion in
+                            Button { query = suggestion; submit() } label: {
+                                HStack(spacing: 10) {
+                                    Image(systemName: "magnifyingglass").font(.footnote).foregroundStyle(model.appearance.muted)
+                                    Text(suggestion).font(.subheadline).foregroundStyle(model.appearance.ink).lineLimit(1)
+                                    Spacer(minLength: 0)
+                                }.frame(minHeight: 44).contentShape(Rectangle())
+                            }.buttonStyle(.plain)
+                        }
+                    }.padding(.horizontal, 12).background(model.appearance.surface, in: RoundedRectangle(cornerRadius: 14))
                 }
                 if submitted.isEmpty { EmptyStateView(symbol: "magnifyingglass", title: "寻找你的下一部好剧", message: "输入剧名或关键词，发现喜欢的故事。") }
                 else {
@@ -417,8 +438,17 @@ struct SearchView: View {
                 }
             }.padding(20)
         }.navigationTitle("搜索").navigationBarTitleDisplayMode(.inline).appBackground(model.appearance).onDisappear { focused = false }
+            // Optional help while typing: a failure simply shows no suggestions.
+            .task(id: query) {
+                let value = query.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !value.isEmpty, value != submitted else { suggestions = []; return }
+                try? await Task.sleep(nanoseconds: 250_000_000)
+                guard !Task.isCancelled else { return }
+                let rows = (try? await DramaAPI.shared.suggestions(query: value)) ?? []
+                if !Task.isCancelled { suggestions = rows }
+            }
     }
-    private func submit() { let value = query.trimmingCharacters(in: .whitespacesAndNewlines); guard !value.isEmpty else { return }; focused = false; submitted = value; load(reset: true) }
+    private func submit() { let value = query.trimmingCharacters(in: .whitespacesAndNewlines); guard !value.isEmpty else { return }; suggestions = []; focused = false; submitted = value; load(reset: true) }
     private func load(reset: Bool = false) { let value = submitted; loader.load(reset: reset) { try await DramaAPI.shared.search(query: value, offset: $0) } }
 }
 

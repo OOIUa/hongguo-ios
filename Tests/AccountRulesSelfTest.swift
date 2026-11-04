@@ -35,6 +35,22 @@ struct AccountRulesSelfTest {
         try check(AccountRules.displayName(["user":["screen_name":"  果果  "]]) == "果果", "name-trimmed")
         try check(AccountRules.displayName(["name":"a\u{0}b", "user_info":["nickname":"备用"]]) == "备用", "name-control-skipped")
         try check(AccountRules.displayName(["screen_name":"", "name":123]) == nil, "name-missing")
-        print("PASS account identity, website authentication, cookie scope, avatar URLs and names: 29 cases")
+        let liked = AccountRules.likes(["data":["mixed_data_list":[
+            ["video_data":["series_id":"701","title":"甲","cover":"https:\\/\\/p\\/1.jpg","episode_cnt":80,"user_digg_timestamp_ms":2000]],
+            ["video_data":["series_id":"702","title":"乙","create_time":3]],
+            ["video_data":["series_id":"bad","title":"无效"]], ["other":1]]]])
+        try check(liked.map(\.id) == ["702","701"] && liked[1].episodeCount == 80 && liked[1].coverURL == "https://p/1.jpg", "likes-parsed")
+        let records = try AccountRules.readHistory(["data":["data_list":[
+            ["book_id":"701","vid":"801","vid_index":3,"series_title":"甲","current_play_position":5000,"read_timestamp_ms":1700000000000,"episode_cnt":80],
+            ["book_id":"701","vid":"800","vid_index":2,"series_title":"甲","read_timestamp_ms":1600000000000],
+            ["series_id":"702","item_id":"802","vid_index":1,"last_watch_time":1700000001],
+            ["book_id":"703","vid":"803","is_delete":true], ["book_id":"bad","vid":"804"]]]])
+        try check(records.map(\.id) == ["702","701"] && records[1].episodeID == "801" && records[1].episodeIndex == 3 && records[1].position == 5, "read-history-newest-per-work")
+        try check(records[0].updatedAt.timeIntervalSince1970 == 1700000001 && records[0].drama.title == "剧集", "read-history-seconds-and-fallback-title")
+        try check((try? AccountRules.readHistory([:])) == nil, "read-history-format-rejected")
+        let accountStats = AccountRules.stats(["data":["follow_user_num":1,"fans_num":2,"recv_digg_num":3]])
+        try check(accountStats.follows == 1 && accountStats.fans == 2 && accountStats.likes == 3, "stats-parsed")
+        try check(AccountRules.stats(["data":[:]]).follows == nil, "stats-missing")
+        print("PASS account identity, website authentication, cookie scope, avatar URLs and names: 34 cases")
     }
 }

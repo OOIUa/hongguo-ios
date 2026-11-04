@@ -1,7 +1,60 @@
 // SPDX-License-Identifier: GPL-3.0-only
 import Foundation
 
+/// Counters of the signed-in account; nil when the platform does not report one.
+struct AccountStats: Sendable {
+    var follows: Int?
+    var fans: Int?
+    var likes: Int?
+}
+
 enum AccountRules {
+    /// Protocol reference: charlie901208/HGTV AccountParser.likes.
+    static func likes(_ raw: [String: Any]) -> [Drama] {
+        var seen = Set<String>(), rows = [(drama: Drama, at: Int64)]()
+        for value in ProtocolJSON.array(ProtocolJSON.dictionary(raw["data"])["mixed_data_list"]) {
+            let row = ProtocolJSON.dictionary(value)
+            let video = ProtocolJSON.dictionary(row["video_data"] ?? row["book_data"])
+            func first(_ values: Any?...) -> String { values.map { ProtocolJSON.text($0) }.first { !$0.isEmpty } ?? "" }
+            let id = first(video["series_id"], row["series_id"], row["book_id"]), title = first(row["series_title"], video["title"], row["book_name"])
+            guard !video.isEmpty, ProtocolJSON.identifier(id) != nil, !title.isEmpty, seen.insert(id).inserted else { continue }
+            let count = [video["episode_cnt"], video["episode_count"], row["episode_cnt"]].map { ProtocolJSON.integer($0) }.first { $0 > 0 } ?? 0
+            let liked = Int64(ProtocolJSON.integer(video["user_digg_timestamp_ms"]))
+            let drama = Drama(id: id, title: title, coverURL: first(row["series_cover_url"], video["cover"], video["cover_url"], video["thumb_url"]).replacingOccurrences(of: "\\/", with: "/"),
+                              summary: first(row["series_intro"], video["video_desc"]), episodeCount: count)
+            rows.append((drama, liked > 0 ? liked : Int64(ProtocolJSON.integer(video["create_time"])) * 1000))
+        }
+        return rows.sorted { $0.at > $1.at }.map(\.drama)
+    }
+
+    /// Watch records, newest per work. Upstream reference: jackotom/hongguo-drama 5.6 account-session.js parseHistory.
+    static func readHistory(_ raw: [String: Any]) throws -> [LibraryEntry] {
+        guard let rows = (ProtocolJSON.dictionary(raw["data"])["data_list"] ?? raw["data_list"]) as? [Any] else { throw HGError.message("账户观看记录格式发生变化") }
+        var newest = [String: LibraryEntry]()
+        for value in rows {
+            let row = ProtocolJSON.dictionary(value)
+            func first(_ values: Any?...) -> String { values.map { ProtocolJSON.text($0) }.first { !$0.isEmpty } ?? "" }
+            let id = first(row["book_id_str"], row["book_id"], row["series_id"]), episode = first(row["vid"], row["item_id"])
+            guard !ProtocolJSON.bool(row["is_delete"]), ProtocolJSON.identifier(id) != nil, ProtocolJSON.identifier(episode) != nil else { continue }
+            var stamp = Double(first(row["read_timestamp_ms"], row["last_watch_time"])) ?? 0
+            if stamp > 1e10 { stamp /= 1000 }
+            let title = first(row["series_title"], row["book_name"]), position = max(0, Double(first(row["current_play_position"], row["current_play_time"])) ?? 0) / 1000
+            let drama = Drama(id: id, title: title.isEmpty ? "剧集" : title, coverURL: first(row["series_cover_url"], row["thumb_url"], row["cover"]).replacingOccurrences(of: "\\/", with: "/"),
+                              summary: "", episodeCount: max(0, [row["episode_cnt"], row["episode_count"]].map { ProtocolJSON.integer($0) }.first { $0 > 0 } ?? 0))
+            let entry = LibraryEntry(drama: drama, episodeID: episode, episodeIndex: max(1, ProtocolJSON.integer(row["vid_index"])), position: position, updatedAt: Date(timeIntervalSince1970: stamp))
+            if let current = newest[id], current.updatedAt >= entry.updatedAt { continue }
+            newest[id] = entry
+        }
+        return Array(newest.values.sorted { $0.updatedAt > $1.updatedAt }.prefix(50))
+    }
+
+    /// Protocol reference: charlie901208/HGTV AccountParser.profile.
+    static func stats(_ raw: [String: Any]) -> AccountStats {
+        let data = ProtocolJSON.dictionary(raw["data"])
+        func count(_ key: String) -> Int? { data[key] == nil || data[key] is NSNull ? nil : max(0, ProtocolJSON.integer(data[key])) }
+        return AccountStats(follows: count("follow_user_num"), fans: count("fans_num"), likes: count("recv_digg_num"))
+    }
+
     static func businessID(_ raw: Any?) -> String? {
         // A boolean/number must never become an authenticated identity through string conversion.
         guard let value = raw as? String, !value.isEmpty, value.count <= 1024,

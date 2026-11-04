@@ -15,6 +15,10 @@ struct PlayerScreen: View {
     @State private var dragging = false
     @State private var sliding = false
     @State private var slideTarget: Int?
+    /// 清屏: only the picture remains until a tap or an inward pinch brings the controls back.
+    @State private var cleanScreen = false
+    /// Holding for 2× hides the same elements, for as long as the hold lasts.
+    private var chromeHidden: Bool { cleanScreen || session.holding }
 
     init(request: PlaybackRequest, model: AppModel) { _session = StateObject(wrappedValue: PlayerSession(request: request, app: model)) }
 
@@ -28,35 +32,39 @@ struct PlayerScreen: View {
                         .onChange(of: full.size.height) { _, height in pageHeight = max(height, 1) }
                 }.ignoresSafeArea().allowsHitTesting(false)
                 VStack(spacing: 0) {
-                    Color.clear.frame(height: geometry.size.height < 420 ? 58 : 70).allowsHitTesting(false)
+                    // The insets keep touches near the controls from pausing; with the controls gone the whole screen responds.
+                    Color.clear.frame(height: cleanScreen ? 0 : (geometry.size.height < 420 ? 58 : 70)).allowsHitTesting(false)
                     VideoGestureView(enabled: !sliding && !episodesVisible && !speedsVisible && !session.scrubbing,
-                                     tap: session.toggle, holdBegan: session.beginHold, holdEnded: session.endHold,
-                                     dragChanged: dragChanged, dragEnded: dragEnded, dragCancelled: dragCancelled)
-                        .accessibilityElement().accessibilityLabel("视频画面").accessibilityHint("轻点暂停或继续，上下拖动切换剧集").accessibilityAddTraits(.isButton)
-                        .accessibilityAction { session.toggle() }
+                                     tap: videoTapped, holdBegan: session.beginHold, holdEnded: session.endHold,
+                                     dragChanged: dragChanged, dragEnded: dragEnded, dragCancelled: dragCancelled,
+                                     pinched: { cleanScreen = $0 })
+                        .accessibilityElement().accessibilityLabel("视频画面").accessibilityHint(cleanScreen ? "轻点退出清屏" : "轻点暂停或继续，上下拖动切换剧集").accessibilityAddTraits(.isButton)
+                        .accessibilityAction { videoTapped() }
+                        .accessibilityAction(named: cleanScreen ? "退出清屏" : "清屏播放") { cleanScreen.toggle() }
                         .accessibilityAction(named: "下一集") { session.next() }
                         .accessibilityAction(named: "上一集") { session.previous() }
-                    Color.clear.frame(height: geometry.size.height < 420 ? 112 : 174).allowsHitTesting(false)
-                }.zIndex(1)
-                LinearGradient(colors: [.black.opacity(0.55), .clear], startPoint: .top, endPoint: .bottom).frame(height: 150).frame(maxHeight: .infinity, alignment: .top).allowsHitTesting(false)
-                LinearGradient(colors: [.clear, .black.opacity(0.9)], startPoint: .top, endPoint: .bottom).frame(height: min(geometry.size.height * 0.45, 300)).frame(maxHeight: .infinity, alignment: .bottom).allowsHitTesting(false)
+                    Color.clear.frame(height: cleanScreen ? 0 : (geometry.size.height < 420 ? 112 : 174)).allowsHitTesting(false)
+                }.ignoresSafeArea(edges: cleanScreen ? .all : []).zIndex(1)
+                LinearGradient(colors: [.black.opacity(0.55), .clear], startPoint: .top, endPoint: .bottom).frame(height: 150).frame(maxHeight: .infinity, alignment: .top).opacity(chromeHidden ? 0 : 1).allowsHitTesting(false)
+                LinearGradient(colors: [.clear, .black.opacity(0.9)], startPoint: .top, endPoint: .bottom).frame(height: min(geometry.size.height * 0.45, 300)).frame(maxHeight: .infinity, alignment: .bottom).opacity(chromeHidden ? 0 : 1).allowsHitTesting(false)
                 VStack(spacing: 0) {
-                    topBar
-                    if session.holding { Label("2× 临时加速中", systemImage: "forward.fill").font(.caption.bold()).padding(.horizontal, 13).padding(.vertical, 8).background(.black.opacity(0.5), in: Capsule()).padding(.top, 10) }
+                    chrome { topBar }
                     Spacer(minLength: 10)
                     if dragging || sliding { EmptyView() }
                     else if session.preparing { preparationPanel.allowsHitTesting(false) }
                     else if let error = session.error { errorPanel(error) }
+                    else if chromeHidden { EmptyView() }
                     else if session.buffering { ProgressView().tint(.white).scaleEffect(1.4).allowsHitTesting(false) }
                     else if !session.isPlaying && session.player != nil {
                         Button(action: session.toggle) { Image(systemName: "play.fill").font(.system(size: 38)).frame(width: 82, height: 82).background(.black.opacity(0.3), in: Circle()) }.buttonStyle(.plain).accessibilityLabel("继续播放")
                     }
                     Spacer(minLength: 10)
-                    if let end = session.endMessage { Text(end).font(.caption).foregroundStyle(.white.opacity(0.8)).padding(.bottom, 12) }
-                    bottomBar(compact: geometry.size.height < 420)
+                    if let end = session.endMessage { chrome { Text(end).font(.caption).foregroundStyle(.white.opacity(0.8)).padding(.bottom, 12) } }
+                    chrome { bottomBar(compact: geometry.size.height < 420) }
                 }.padding(.horizontal, 20).padding(.top, 6).padding(.bottom, 12).zIndex(2).allowsHitTesting(!sliding)
             }.foregroundStyle(.white)
-        }.background(.black).preferredColorScheme(.dark).statusBarHidden(false)
+            .animation(.easeOut(duration: 0.18), value: chromeHidden)
+        }.background(.black).preferredColorScheme(.dark).statusBarHidden(chromeHidden).persistentSystemOverlays(chromeHidden ? .hidden : .automatic)
             .sheet(isPresented: $episodesVisible) { episodeSheet }
             .sheet(isPresented: $speedsVisible) { speedSheet }
             .task { session.onSlide = { target in slide(to: target) }; session.start() }
@@ -65,6 +73,19 @@ struct PlayerScreen: View {
             .onChange(of: episodesVisible) { _, shown in if shown { session.endHold() } }
             .onChange(of: speedsVisible) { _, shown in if shown { session.endHold() } }
             .onChange(of: session.app.preloadNext) { _, _ in session.preferencesChanged() }
+            // Anything the viewer has to act on brings the controls back: an error, the end of the last episode, a pause they did not ask for.
+            .onChange(of: session.error) { _, error in if error != nil { cleanScreen = false } }
+            .onChange(of: session.endMessage) { _, message in if message != nil { cleanScreen = false } }
+            .onChange(of: session.isPlaying) { _, playing in
+                if !playing, !session.buffering, !session.preparing, session.rendered, !dragging, !sliding { cleanScreen = false }
+            }
+    }
+
+    private func videoTapped() { if cleanScreen { cleanScreen = false } else { session.toggle() } }
+
+    /// Controls fade out with the screen and stop taking touches and VoiceOver focus.
+    private func chrome(@ViewBuilder content: () -> some View) -> some View {
+        content().opacity(chromeHidden ? 0 : 1).allowsHitTesting(!chromeHidden).accessibilityHidden(chromeHidden)
     }
 
     // MARK: Episode paging
@@ -169,7 +190,7 @@ struct PlayerScreen: View {
 
     private func bottomBar(compact: Bool) -> some View {
         VStack(alignment: .leading, spacing: compact ? 6 : 13) {
-            if !compact { HStack { Text("第 \(visibleEpisode.index) 集").font(.title3.bold()); Spacer(); Text("上滑下一集 · 左侧长按 2×").font(.caption2).foregroundStyle(.white.opacity(0.55)) } }
+            if !compact { HStack { Text("第 \(visibleEpisode.index) 集").font(.title3.bold()); Spacer(); Text("上滑下一集 · 左侧长按 2× · 双指外拉清屏").font(.caption2).foregroundStyle(.white.opacity(0.55)).lineLimit(1).minimumScaleFactor(0.8) } }
             HStack(spacing: 10) {
                 Text(timeLabel(session.scrubbing ? session.previewPosition : session.position)).font(.caption.monospacedDigit()).frame(minWidth: 36)
                 Slider(value: Binding(get: { session.scrubbing ? session.previewPosition : session.position }, set: { session.previewPosition = $0 }), in: 0...max(session.duration, 1), onEditingChanged: session.setSeeking).tint(Color(hex: 0xF08058)).disabled(session.duration <= 0).accessibilityLabel("播放进度")
@@ -237,6 +258,8 @@ private struct VideoGestureView: UIViewRepresentable {
     let dragChanged: (CGFloat) -> Void
     let dragEnded: (CGFloat, CGFloat) -> Void
     let dragCancelled: () -> Void
+    /// true for fingers moving apart, false for fingers moving together. Fires once per gesture.
+    let pinched: (Bool) -> Void
     func makeCoordinator() -> Coordinator { Coordinator(self) }
     func makeUIView(context: Context) -> UIView {
         let view = UIView(); view.backgroundColor = .clear
@@ -245,7 +268,8 @@ private struct VideoGestureView: UIViewRepresentable {
         // A vertical pan replaces the old one-shot swipes so the page follows the finger. While a hold is active the
         // pan cannot start, and a pan that starts first makes the hold fail, so 2x and paging never mix.
         let pan = UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.panned(_:))); pan.maximumNumberOfTouches = 1; pan.delegate = context.coordinator
-        let recognizers: [UIGestureRecognizer] = [hold, tap, pan]
+        let pinch = UIPinchGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.pinchChanged(_:)))
+        let recognizers: [UIGestureRecognizer] = [hold, tap, pan, pinch]
         recognizers.forEach { $0.isEnabled = enabled; view.addGestureRecognizer($0) }
         return view
     }
@@ -256,7 +280,14 @@ private struct VideoGestureView: UIViewRepresentable {
     static func dismantleUIView(_ uiView: UIView, coordinator: Coordinator) { coordinator.parent.holdEnded(); coordinator.parent.dragCancelled() }
     @MainActor final class Coordinator: NSObject, UIGestureRecognizerDelegate {
         var parent: VideoGestureView
+        private var pinchDecided = false
         init(_ parent: VideoGestureView) { self.parent = parent }
+        @objc func pinchChanged(_ gesture: UIPinchGestureRecognizer) {
+            if gesture.state == .began { pinchDecided = false }
+            guard gesture.state == .changed, !pinchDecided, gesture.scale >= 1.18 || gesture.scale <= 0.85 else { return }
+            pinchDecided = true
+            parent.pinched(gesture.scale > 1)
+        }
         @objc func tapped() { parent.tap() }
         @objc func hold(_ gesture: UILongPressGestureRecognizer) { if gesture.state == .began, let view = gesture.view, gesture.location(in: view).x < view.bounds.width / 2 { parent.holdBegan() }; if [.ended, .cancelled, .failed].contains(gesture.state) { parent.holdEnded() } }
         @objc func panned(_ gesture: UIPanGestureRecognizer) {
@@ -270,6 +301,8 @@ private struct VideoGestureView: UIViewRepresentable {
         }
         func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
             guard let pan = gestureRecognizer as? UIPanGestureRecognizer, let view = pan.view else { return true }
+            // A second finger makes this a pinch rather than a page drag.
+            guard pan.numberOfTouches <= 1 else { return false }
             let velocity = pan.velocity(in: view)
             return abs(velocity.y) > abs(velocity.x)
         }

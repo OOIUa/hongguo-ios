@@ -138,6 +138,41 @@ import JavaScriptCore
         _ = try await restarting.next()
         precondition(restartCalls.values.prefix(3).map(\.0) == ["", "old", ""] && restartCalls.values.prefix(3).map(\.1) == [0, 1, 1])
         print("PASS: 猜你喜欢 anonymous/signed-in request, parsing, pager batching and host rotation.")
+        // Related works: playable types only, season numbering, and the next season after the gap.
+        func relatedRow(_ id: String, _ type: Int, _ tag: String, episodes: Int = 80, extra: String = "") -> String {
+            #"{"series_id":"\#(id)","title":"作品\#(id)","content_type":\#(type),"episode_cnt":\#(episodes),"cover":"https:\/\/p.example.invalid\/\#(id).jpg","video_desc":"简介","tag_info":{"text":"\#(tag)"}\#(extra)}"#
+        }
+        let plan = "{\"code\":0,\"data\":[{\"cell_name\":\"相关作品\",\"show_type\":547,\"video_data\":[" + [relatedRow("1",1004,"第1季"), relatedRow("2",1,"第2季"), relatedRow("3",1007,"第4季",episodes:0), relatedRow("4",1002,"第5季",episodes:0), relatedRow("5",1004,"同IP"), relatedRow("100",1004,"第3季"), relatedRow("6",5,"小说"), relatedRow("7",1004,"第6季",episodes:0), relatedRow("8",1004,"第7季",extra:#","disable_play":true"#)].joined(separator: ",") + "]},{\"cell_name\":\"猜你喜欢\",\"show_type\":506,\"video_data\":[" + relatedRow("9",1004,"") + "]}]}"
+        let works = try RelatedWorks.parse(ProtocolJSON.object(Data(plan.utf8)), currentID: "100")
+        precondition(works.map(\.id) == ["1","2","3","4","5"] && works.map(\.seasonNumber) == [1,2,4,5,0] && works.map(\.upcoming) == [false,false,true,true,false])
+        precondition(works[0].drama.coverURL == "https://p.example.invalid/1.jpg" && works[0].drama.episodeCount == 80)
+        precondition((try? RelatedWorks.parse(["code":1], currentID: "1")) == nil && (try? RelatedWorks.parse(["code":0], currentID: "1")) == nil)
+        let season = { (n: Int, upcoming: Bool) in RelatedWork(drama: Drama(id: "7\(n)", title: "第\(n)", coverURL: "", summary: "", episodeCount: 1), season: "第\(n)季", upcoming: upcoming, seasonNumber: n) }
+        precondition(RelatedWorks.nextSeason([season(1,false),season(3,false),season(4,false)])?.seasonNumber == 3)
+        precondition(RelatedWorks.nextSeason([season(2,false)])?.seasonNumber == 2)
+        precondition(RelatedWorks.nextSeason([season(1,false),season(2,false),season(3,true),season(5,true)])?.seasonNumber == 5)
+        precondition(RelatedWorks.nextSeason([season(1,false),season(2,false)]) == nil && RelatedWorks.nextSeason([season(1,false),season(4,false)]) == nil && RelatedWorks.nextSeason([]) == nil)
+        let relatedQuery = RelatedWorks.query(id: "123", device: RelatedWorks.device())
+        precondition(relatedQuery.contains(["book_id","123"]) && relatedQuery.contains(["scene","10"]) && RelatedWorks.path == "/reading/bookapi/plan/v:version/")
+        print("PASS: related works parsing and next season.")
+        // Website boards: escaped router payload, page checks, and suggestion limits.
+        func rankPage(_ route: String, number: Int = 1, success: Bool = true) -> String {
+            let json = #"["rank_\#(route)/page","content",{"isSuccess":\#(success),"rankList":[{"id":"701","seriesId":"701","rank":21,"title":"甲&乙","cover":"https://p.example.invalid/1.jpg","heatText":"9万热度","description":"it's","episodeCount":80},{"seriesId":"702","rank":22,"title":"丙","episodeVids":["1","2"]},{"seriesId":"bad","title":"无效"},{"seriesId":"701","title":"重复"}],"pagination":{"pageNum":\#(number),"totalPages":5}}]"#
+            let escaped = json.replacingOccurrences(of: "&", with: "&amp;").replacingOccurrences(of: "\"", with: "&quot;").replacingOccurrences(of: "'", with: "&#x27;")
+            return "<html><script data-fn-name=\"r\" data-fn-args='\(escaped)'></script></html>"
+        }
+        let boardPage = try WebsiteCatalog.parseRank(rankPage("hot-drama"), board: .all, page: 1)
+        precondition(boardPage.entries.map(\.id) == ["701","702"] && boardPage.entries[0].drama.title == "甲&乙" && boardPage.entries[0].drama.summary == "it's")
+        precondition(boardPage.entries[0].rank == 21 && boardPage.entries[0].drama.episodeCount == 80 && boardPage.entries[1].drama.episodeCount == 2 && boardPage.totalPages == 5)
+        precondition((try? WebsiteCatalog.parseRank(rankPage("hot-ai-drama"), board: .all, page: 1)) == nil)
+        precondition((try? WebsiteCatalog.parseRank(rankPage("hot-drama", success: false), board: .all, page: 1)) == nil)
+        precondition((try? WebsiteCatalog.parseRank(rankPage("hot-drama", number: 3), board: .all, page: 1)) == nil)
+        precondition((try? WebsiteCatalog.parseRank("<html></html>", board: .all, page: 1)) == nil)
+        precondition(WebsiteCatalog.rankURL(.real, page: 2).absoluteString == "https://hongguoduanju.com/rank/hot-real-drama?page=2")
+        precondition(WebsiteCatalog.rankURL(.all, page: 1).absoluteString == "https://hongguoduanju.com/rank/hot-drama")
+        precondition(WebsiteCatalog.parseSuggestions(["suggest_list": (1...12).map { ["name": "剧\($0)"] }]).count == 8)
+        precondition(WebsiteCatalog.parseSuggestions(["suggest_list": [["name":"甲"],["display_words":["乙"]],["name":"甲"],["name":" "]]]) == ["甲","乙"])
+        print("PASS: website boards and suggestions.")
         // video_tab playback model: full GetVideoModelRequest query, object/string model, rejection of unusable replies.
         let identity = RegisteredIdentity(deviceID: "9999999999999999999", installID: "9999999999999999998", cdid: "offline", appDeviceCookie: "")
         let tabURL = DramaAPI.tabVideoURL(identity, episodeID: "7600000000000000001", rticket: 1)
