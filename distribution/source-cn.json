@@ -3,24 +3,24 @@
   "message": "项目维护者发布的未签名 IPA；需要自行签名安装。加速服务由第三方提供。",
   "identifier": "ooiua.hongguo-ios.source-cn",
   "sourceURL": "https://gh-proxy.com/https://raw.githubusercontent.com/OOIUa/hongguo-ios/main/distribution/source-cn.json",
-  "sourceicon": "https://gh-proxy.com/https://raw.githubusercontent.com/OOIUa/hongguo-ios/v0.1.11/distribution/icon.png",
+  "sourceicon": "https://gh-proxy.com/https://raw.githubusercontent.com/OOIUa/hongguo-ios/v0.1.12/distribution/icon.png",
   "apps": [
     {
       "name": "红果独立版",
       "type": "1",
       "bundleIdentifier": "com.ooiua.hongguo.ios",
-      "version": "0.1.11",
-      "build": 12,
+      "version": "0.1.12",
+      "build": 13,
       "minimumOSVersion": "17.0",
-      "versionDate": "2026-11-04T12:50:09Z",
-      "versionDescription": "手机验证码改走官方 App 通道；平台要求验证时会弹窗引导到官方登录页手动完成。如遇问题可改用官网或扫码登录。\n推荐修复登录后错误码 110，失败时换域名重试，翻页不再大量重复。\n每次取播放信息注册新的匿名设备；只提供 ByteVC2 的集会明确提示；缺加密信息的片源可使用校验通过的备用片源。\n列表提前加载下一页并预加载封面。\n未签名 IPA，需使用本人的证书签名后安装。",
+      "versionDate": "2026-11-04T15:27:23Z",
+      "versionDescription": "新增完整榜单、搜索联想、相关作品与续季、短剧预约，以及红果账号的观看历史、点赞记录和资料。\n三套主题都有浅色和深色，可跟随系统。\n播放时长按左侧 2 倍速会隐藏界面；双指外拉可清屏，轻点或内捏恢复。\n首页推荐移到最右并默认打开；追剧和播放历史改为三列海报，登录后优先显示红果账号记录，播放历史改为独立页面。\n收藏按钮区分本机和账号；确认弹窗位置修正。\n未签名 IPA，需使用本人的证书签名后安装。",
       "lock": "0",
-      "downloadURL": "https://gh-proxy.com/https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.11/Hongguo-iOS-0.1.11-unsigned.ipa",
+      "downloadURL": "https://gh-proxy.com/https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.12/Hongguo-iOS-0.1.12-unsigned.ipa",
       "isLanZouCloud": "0",
-      "iconURL": "https://gh-proxy.com/https://raw.githubusercontent.com/OOIUa/hongguo-ios/v0.1.11/distribution/icon.png",
+      "iconURL": "https://gh-proxy.com/https://raw.githubusercontent.com/OOIUa/hongguo-ios/v0.1.12/distribution/icon.png",
       "tintColor": "E8463F",
-      "size": "1481378",
-      "sha256": "e9cbae13aee83aa6c9655f567b4de3486d8b1da0afbba630a521d2643f2f7957"
+      "size": "1647259",
+      "sha256": "d5356e11f783131b5bb0958e399186a5fb51ebec120335692855aad47154b1f3"
     }
   ]
 }
