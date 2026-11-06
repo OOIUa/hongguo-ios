@@ -173,16 +173,28 @@ import JavaScriptCore
         precondition(WebsiteCatalog.parseSuggestions(["suggest_list": (1...12).map { ["name": "剧\($0)"] }]).count == 8)
         precondition(WebsiteCatalog.parseSuggestions(["suggest_list": [["name":"甲"],["display_words":["乙"]],["name":"甲"],["name":" "]]]) == ["甲","乙"])
         print("PASS: website boards and suggestions.")
-        // video_tab playback model: full GetVideoModelRequest query, object/string model, rejection of unusable replies.
-        let identity = RegisteredIdentity(deviceID: "9999999999999999999", installID: "9999999999999999998", cdid: "offline", appDeviceCookie: "")
-        let tabURL = DramaAPI.tabVideoURL(identity, episodeID: "7600000000000000001", rticket: 1)
-        let tabQuery = URLComponents(url: tabURL, resolvingAgainstBaseURL: false)!.queryItems!
-        precondition(tabURL.absoluteString.hasPrefix("https://api5-normal-sinfonlineb.fqnovel.com/reading/bookapi/video_tab/multi_video_model/v1/?"))
+        // Signed playback: the full GetVideoModelRequest query, the registered identity in the query and the official
+        // player's version and headers; object/string model, rejection of unusable replies.
+        let identity = RegisteredIdentity(deviceID: "9999999999999999999", installID: "9999999999999999998", cdid: "offline", appDeviceCookie: "install_id=1; ttreq=2")
+        let playbackDevice = DramaAPI.playbackDevice(identity)
+        let playbackQuery = DramaAPI.playbackQuery(playbackDevice)
+        precondition(Dictionary(uniqueKeysWithValues: playbackQuery.map { ($0[0], $0[1]) }) == playbackDevice, "playback query carries every device field")
+        precondition(playbackQuery.first == ["iid","9999999999999999998"] && playbackQuery[1] == ["device_id","9999999999999999999"])
+        precondition(playbackDevice["version_name"] == "7.3.9.32" && playbackDevice["version_code"] == "73932" && playbackDevice["pv_player"] == "73932")
+        let tabQuery = DramaAPI.tabVideoQuery(episodeID: "7600000000000000001").map { URLQueryItem(name: $0[0], value: $0[1]) }
         for (name, expected) in [("video_id","7600000000000000001"),("video_id_type","0"),("device_level","1"),("need_all_video_definition","1"),
-                                 ("need_mp4_align","0"),("use_os_player","0"),("video_platform","1024"),("source","0"),("from_video_id",""),
-                                 ("device_id","9999999999999999999"),("iid","9999999999999999998")] {
+                                 ("need_mp4_align","0"),("use_os_player","0"),("video_platform","1024"),("source","0"),("from_video_id","")] {
             precondition(value(tabQuery, name) == expected, "video_tab query \(name)")
         }
+        let postHeaders = DramaAPI.playbackHeaders(identity, post: true), getHeaders = DramaAPI.playbackHeaders(identity, post: false)
+        precondition(postHeaders["Cookie"] == "install_id=1; ttreq=2" && getHeaders["Cookie"] == "install_id=1; ttreq=2")
+        precondition(postHeaders["Content-Type"] == "application/json; charset=utf-8" && getHeaders["Content-Type"] == nil)
+        precondition(DramaAPI.playbackRoutes.map(\.post) == [false, true, false, true] && DramaAPI.playbackRoutes.map(\.renewsIdentity) == [false, false, true, false])
+        precondition(DramaAPI.playbackRoutes.last?.host == DramaAPI.playbackRetryHost)
+        let playbackSignature = try await ProtocolSigner(resourceDirectory: resources).signedRequest(baseURL: "https://\(DramaAPI.playbackHost)/reading/bookapi/video_tab/multi_video_model/v1/",
+            query: playbackQuery + DramaAPI.tabVideoQuery(episodeID: "7600000000000000001"), body: nil, device: playbackDevice)
+        for name in ["x-gorgon","x-khronos","x-ladon","x-argus","x-helios","x-medusa","x-ss-req-ticket"] { precondition(playbackSignature.headers[name]?.isEmpty == false, "signed playback header \(name)") }
+        precondition(playbackSignature.url.absoluteString.contains("from_video_id=&_rticket="))
         let tabObject = DramaAPI.tabVideoModel(Data(#"{"code":0,"data":{"video_model_data":{"7600000000000000001":{"video_model":{"video_list":[{"codec_type":"bytevc1"}]}}}}}"#.utf8), episodeID: "7600000000000000001")
         precondition(ProtocolJSON.array(tabObject?["video_list"]).count == 1)
         let tabString = DramaAPI.tabVideoModel(Data(#"{"code":0,"data":{"video_model_data":{"7600000000000000001":{"video_model":"{\"video_list\":[{\"codec_type\":\"h264\"}]}"}}}}"#.utf8), episodeID: "7600000000000000001")
@@ -191,7 +203,6 @@ import JavaScriptCore
         precondition(DramaAPI.tabVideoModel(Data(), episodeID: "7600000000000000001") == nil)
         precondition(DramaAPI.tabVideoModel(Data(#"{"code":0,"data":{"video_model_data":{"7600000000000000999":{"video_model":{"video_list":[{}]}}}}}"#.utf8), episodeID: "7600000000000000001") == nil)
         precondition(DramaAPI.tabVideoModel(Data(#"{"code":0,"data":{"video_model_data":{"7600000000000000001":{"video_model":{"video_list":[]}}}}}"#.utf8), episodeID: "7600000000000000001") == nil)
-        precondition(DramaAPI.playbackURL(identity, host: DramaAPI.playbackRetryHost, rticket: 1).absoluteString.hasPrefix("https://api5-normal-hl.fqnovel.com/novel/player/multi_video_model/v1/?"))
         // ByteVC2-only episodes say so; inline rows without encryption metadata may use a fully verified fallback.
         let trackAPI = DramaAPI(resourceDirectory: resources)
         let videoRow = { (codec: String, url: String, side: Int) -> [String: Any] in ["codec_type":codec,"vwidth":side,"vheight":side * 16 / 9,"definition":"\(side)p","main_url":url] }

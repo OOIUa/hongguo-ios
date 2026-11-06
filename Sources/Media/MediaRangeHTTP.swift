@@ -22,6 +22,12 @@ final class MediaRangeHTTP: NSObject, URLSessionDataDelegate, @unchecked Sendabl
               let host = url.host?.lowercased(), url.port == nil || url.port == 443 else { return false }
         return ["qznovelvod.com", "fqnovelvod.com", "douyinvod.com"].contains { host == $0 || host.hasSuffix("." + $0) }
     }
+    /// A media host may answer 302 to its CDN's scheduling domain (seen 2026-11-06). Those are accepted only after a redirect from an allowed host.
+    static func allowedAfterRedirect(_ url: URL) -> Bool {
+        guard url.scheme?.lowercased() == "https", url.user == nil, url.password == nil,
+              let host = url.host?.lowercased(), url.port == nil || url.port == 443 else { return false }
+        return allowed(url) || ["vegslb.com", "bdcgslb.com"].contains { host.hasSuffix("." + $0) }
+    }
     static func fetch(_ url: URL, range: Range<Int>, configuration: URLSessionConfiguration? = nil) async throws -> MediaRangeReply {
         guard allowed(url), range.lowerBound >= 0, !range.isEmpty, range.count <= 32 * 1024 * 1024,
               range.upperBound <= MP4Processor.maximumBytes else { throw MediaError.invalidMedia }
@@ -54,7 +60,7 @@ final class MediaRangeHTTP: NSObject, URLSessionDataDelegate, @unchecked Sendabl
     private func cancel() { lock.lock(); cancelled = true; let task = task; lock.unlock(); task?.cancel() }
     func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
                     newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
-        guard let url = request.url, Self.allowed(url) else { failure = MediaError.transport; completionHandler(nil); return }
+        guard let url = request.url, Self.allowedAfterRedirect(url) else { failure = MediaError.transport; completionHandler(nil); return }
         var safe = request; safe.httpShouldHandleCookies = false
         safe.setValue(nil, forHTTPHeaderField: "Cookie"); safe.setValue(nil, forHTTPHeaderField: "Authorization")
         safe.setValue("bytes=\(range.lowerBound)-\(range.upperBound - 1)", forHTTPHeaderField: "Range")
@@ -63,7 +69,7 @@ final class MediaRangeHTTP: NSObject, URLSessionDataDelegate, @unchecked Sendabl
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse,
                     completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
         guard let http = response as? HTTPURLResponse, http.statusCode == 206,
-              let address = http.url, Self.allowed(address),
+              let address = http.url, Self.allowedAfterRedirect(address),
               let header = http.value(forHTTPHeaderField: "Content-Range"),
               let parsed = Self.contentRange(header), parsed.start == range.lowerBound,
               parsed.total > 0, parsed.total <= MP4Processor.maximumBytes,

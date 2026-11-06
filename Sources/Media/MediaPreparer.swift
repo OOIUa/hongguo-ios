@@ -216,7 +216,7 @@ private final class MediaDownload: NSObject, URLSessionDownloadDelegate, @unchec
         lock.lock(); cancelled = true; let task = task; lock.unlock(); task?.cancel()
     }
     func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
-        guard let url = request.url, Self.allowed(url) else {
+        guard let url = request.url, MediaRangeHTTP.allowedAfterRedirect(url) else {
             terminalError = MediaError.transport; completionHandler(nil); return
         }
         completionHandler(request)
@@ -234,7 +234,7 @@ private final class MediaDownload: NSObject, URLSessionDownloadDelegate, @unchec
     func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {
         do {
             guard let response = downloadTask.response as? HTTPURLResponse, response.statusCode == 200,
-                  let finalURL = response.url, Self.allowed(finalURL) else { throw MediaError.transport }
+                  let finalURL = response.url, MediaRangeHTTP.allowedAfterRedirect(finalURL) else { throw MediaError.transport }
             let size = (try FileManager.default.attributesOfItem(atPath: location.path)[.size] as? NSNumber)?.intValue ?? 0
             guard size > 0, size <= limit else { throw size > limit ? MediaError.tooLarge : MediaError.invalidMedia }
             if response.expectedContentLength >= 0 && response.expectedContentLength != Int64(size) { throw MediaError.invalidMedia }

@@ -19,6 +19,7 @@ actor DramaAPI {
     private var detailOrder: [String] = []
     private var seenByDiscovery: [String: [String]] = [:]
     private var searchCursors: [String: SearchCursor] = [:]
+    private(set) var lastPlaybackTrace = ""
     private var registrationFailedAt: Date?
     private var relatedCache: [String: [RelatedWork]] = [:]
     private let suggestionWebID = UUID().uuidString.lowercased()
@@ -206,35 +207,7 @@ actor DramaAPI {
         let biz: [String: Any] = ["detail_page_version":0,"device_level":1,"disable_digg_stat":false,"need_all_video_definition":true,
             "need_mp4_align":false,"use_os_player":false,"use_server_dns":false,"video_platform":1024]
         let body = try ProtocolJSON.data(["biz_param":biz,"mixed_video_id_map":["1004":[episodeID]]])
-        let headers = ["User-Agent":PlaybackRegistration.userAgent, "Accept":"application/json; charset=utf-8,application/x-protobuf", "Content-Type":"application/json; charset=UTF-8"]
-        var identity = try await freshPlaybackIdentity()
-        let model: [String: Any]
-        // The official App now reads GET video_tab/multi_video_model; since 2026-11-02 the POST /novel/player
-        // endpoint answers every variant with 0 bytes. Try it once and keep the old flow as the fallback
-        // (synchronized from hongguoTV 0.1.15).
-        if let tab = await tabVideoModel(episodeID: episodeID, identity: identity) {
-            model = tab
-        } else {
-            var response: [String: Any] = [:]
-            for attempt in 0..<2 {
-                let data = try await fetch(url: Self.playbackURL(identity, host: attempt == 0 ? Self.playbackHost : Self.playbackRetryHost), body: body,
-                                           headers: attempt == 0 ? headers : headers.merging(["Connection":"close"]) { $1 })
-                if !data.isEmpty {
-                    do { response = try ProtocolJSON.object(data) } catch { throw HGError.message("服务数据格式发生变化，请稍后重试") }
-                    break
-                }
-                // An empty reply usually means the anonymous identity was rejected: renew it and, 300 ms later, retry
-                // once on the alternate host over a fresh connection. A failed renewal still retries with the old
-                // identity (synchronized from hongguo-drama 5.4). A second empty reply is reported.
-                try Task.checkCancellation()
-                guard attempt == 0 else { throw HGError.message("播放服务返回空响应，疑似播放设备身份被拒，请稍后重试") }
-                if let renewed = try? await freshPlaybackIdentity() { identity = renewed }
-                try await Task.sleep(nanoseconds: 300_000_000)
-            }
-            guard ProtocolJSON.integer(response["code"] ?? response["Code"]) == 0 else { throw HGError.message("当前分集暂未提供播放信息") }
-            let entry = ProtocolJSON.dictionary(ProtocolJSON.dictionary(response["data"])[episodeID])
-            model = ProtocolJSON.dictionary(entry["video_model"])
-        }
+        let model = try await playbackModel(episodeID: episodeID, body: body)
         guard !model.isEmpty else { throw HGError.message("服务暂未返回当前分集片源") }
         return try await modelTrack(model)
     }
@@ -331,28 +304,84 @@ actor DramaAPI {
     }
 
     static let playbackHost = "api5-normal-sinfonlineb.fqnovel.com", playbackRetryHost = "api5-normal-hl.fqnovel.com"
+    private static let tabVideoPath = "/reading/bookapi/video_tab/multi_video_model/v1/", postVideoPath = "/novel/player/multi_video_model/v1/"
 
-    static func playbackURL(_ identity: RegisteredIdentity, host: String = playbackHost, rticket: Int64 = Int64(Date().timeIntervalSince1970 * 1000)) -> URL {
-        let profile = identity.device
-        let query = profile.keys.sorted().map { [ $0, profile[$0]! ] } + [["_rticket",String(rticket)]]
-        return URL(string: "https://\(host)/novel/player/multi_video_model/v1/?" + query.map { encode($0[0])+"="+encode($0[1]) }.joined(separator: "&"))!
+    /// The model endpoints answer an unsigned request with 0 bytes since 2026-11-05, and a signed POST without the
+    /// registration cookie or x-ss-stub is rejected too (hongguoTV 0.1.22-0.1.25). A signed read still comes back empty
+    /// now and then depending on identity and path, and a new identity usually recovers, so the plan is: the official
+    /// GET, then POST, then a new identity on GET and on the alternate host. The whole read is bounded.
+    private func playbackModel(episodeID: String, body: Data) async throws -> [String: Any] {
+        var identity = try await freshPlaybackIdentity()
+        var trace: [String] = []
+        var failure: Error?
+        var onlyEmpty = true
+        let started = Date()
+        defer { lastPlaybackTrace = trace.joined(separator: " ") }
+        for route in Self.playbackRoutes {
+            guard Date().timeIntervalSince(started) < 20 else { break }
+            try Task.checkCancellation()
+            if route.renewsIdentity, let renewed = try? await freshPlaybackIdentity() { identity = renewed; trace.append("new") }
+            let label = (route.post ? "P:" : "G:") + (route.host == Self.playbackHost ? "b" : "hl")
+            do {
+                let signed = try await signedPlaybackRequest(route: route, episodeID: episodeID, body: body, identity: identity)
+                let data = try await fetch(url: signed.url, body: route.post ? body : nil, headers: signed.headers, timeout: 8)
+                guard !data.isEmpty else { trace.append(label + "=0B"); continue }
+                if !route.post {
+                    if let model = Self.tabVideoModel(data, episodeID: episodeID) { trace.append(label + "=ok"); return model }
+                    trace.append(label + "=invalid"); onlyEmpty = false; continue
+                }
+                guard let response = try? ProtocolJSON.object(data) else { trace.append(label + "=invalid"); onlyEmpty = false; continue }
+                guard ProtocolJSON.integer(response["code"] ?? response["Code"]) == 0 else {
+                    trace.append(label + "=rejected"); throw HGError.message("当前分集暂未提供播放信息")
+                }
+                trace.append(label + "=ok")
+                return ProtocolJSON.dictionary(ProtocolJSON.dictionary(ProtocolJSON.dictionary(response["data"])[episodeID])["video_model"])
+            } catch is CancellationError { throw CancellationError()
+            } catch let error as HGError {
+                if case .message(let text) = error, text == "当前分集暂未提供播放信息" { throw error }
+                trace.append(label + "=failed"); onlyEmpty = false; failure = error
+            } catch { trace.append(label + "=failed"); onlyEmpty = false; failure = error }
+        }
+        if onlyEmpty { throw HGError.message("播放服务返回空响应，疑似播放设备身份被拒，请稍后重试") }
+        throw failure ?? HGError.message("服务暂未返回当前分集片源")
     }
 
-    /// One request to the video_tab endpoint; any failure returns nil so the caller falls back to the old flow.
-    private func tabVideoModel(episodeID: String, identity: RegisteredIdentity) async -> [String: Any]? {
-        var headers = ["User-Agent":PlaybackRegistration.userAgent, "Accept":"application/json; charset=utf-8"]
-        if !identity.appDeviceCookie.isEmpty { headers["Cookie"] = identity.appDeviceCookie }
-        guard let data = try? await fetch(url: Self.tabVideoURL(identity, episodeID: episodeID), headers: headers) else { return nil }
-        return Self.tabVideoModel(data, episodeID: episodeID)
+    struct PlaybackRoute: Sendable, Equatable { let post: Bool; let host: String; let renewsIdentity: Bool }
+    static let playbackRoutes = [PlaybackRoute(post: false, host: playbackHost, renewsIdentity: false), PlaybackRoute(post: true, host: playbackHost, renewsIdentity: false),
+                                 PlaybackRoute(post: false, host: playbackHost, renewsIdentity: true), PlaybackRoute(post: true, host: playbackRetryHost, renewsIdentity: false)]
+
+    /// The identity goes into both the query and the signature, and the signature covers the exact final query.
+    private func signedPlaybackRequest(route: PlaybackRoute, episodeID: String, body: Data, identity: RegisteredIdentity) async throws -> SignedProtocolRequest {
+        let device = Self.playbackDevice(identity)
+        let extra = route.post ? [] : Self.tabVideoQuery(episodeID: episodeID)
+        let signed = try await signer.signedRequest(baseURL: "https://\(route.host)\(route.post ? Self.postVideoPath : Self.tabVideoPath)",
+            query: Self.playbackQuery(device) + extra, body: route.post ? body : nil, device: device)
+        return SignedProtocolRequest(url: signed.url, headers: signed.headers.merging(Self.playbackHeaders(identity, post: route.post)) { $1 })
+    }
+
+    /// The official player's version, in the query and in the signature alike.
+    static func playbackDevice(_ identity: RegisteredIdentity) -> [String: String] {
+        identity.device.merging(["version_code":"73932", "manifest_version_code":"73932", "update_version_code":"73932", "pv_player":"73932", "version_name":"7.3.9.32"]) { $1 }
+    }
+
+    static func playbackQuery(_ device: [String: String]) -> [[String]] {
+        let order = ["iid", "device_id", "ac", "channel", "aid", "app_name", "version_code", "version_name", "device_platform", "os", "ssmix", "device_type",
+                     "device_brand", "language", "os_api", "os_version", "manifest_version_code", "resolution", "dpi", "update_version_code", "host_abi",
+                     "dragon_device_type", "pv_player", "compliance_status", "need_personal_recommend", "player_so_load", "is_android_pad_screen", "cdid"]
+        return order.compactMap { name in device[name].map { [name, $0] } }
     }
 
     /// Every GetVideoModelRequest field is required; a missing one is answered with 100103 PARAM_INVALID.
-    static func tabVideoURL(_ identity: RegisteredIdentity, episodeID: String, rticket: Int64 = Int64(Date().timeIntervalSince1970 * 1000)) -> URL {
-        let profile = identity.device
-        let query = profile.keys.sorted().map { [ $0, profile[$0]! ] } + [["_rticket",String(rticket)],
-            ["video_id",episodeID],["video_id_type","0"],["device_level","1"],["need_all_video_definition","1"],["need_mp4_align","0"],
-            ["use_os_player","0"],["video_platform","1024"],["source","0"],["from_video_id",""]]
-        return URL(string: "https://\(playbackHost)/reading/bookapi/video_tab/multi_video_model/v1/?" + query.map { encode($0[0])+"="+encode($0[1]) }.joined(separator: "&"))!
+    static func tabVideoQuery(episodeID: String) -> [[String]] {
+        [["video_id",episodeID],["video_id_type","0"],["device_level","1"],["need_all_video_definition","1"],["need_mp4_align","0"],
+         ["use_os_player","0"],["video_platform","1024"],["source","0"],["from_video_id",""]]
+    }
+
+    static func playbackHeaders(_ identity: RegisteredIdentity, post: Bool) -> [String: String] {
+        var headers = ["User-Agent":PlaybackRegistration.userAgent, "Accept":"application/json; charset=utf-8,application/x-protobuf", "sdk-version":"2", "x-xs-from-web":"0"]
+        if post { headers["Content-Type"] = "application/json; charset=utf-8" }
+        if !identity.appDeviceCookie.isEmpty { headers["Cookie"] = identity.appDeviceCookie }
+        return headers
     }
 
     /// `data.video_model_data[id].video_model` (object or JSON string) with a non-empty `video_list`, else nil.
@@ -404,13 +433,13 @@ actor DramaAPI {
         guard !data.isEmpty else { throw HGError.message("服务返回空响应，请稍后重试") }
         do { return try ProtocolJSON.object(data) } catch { throw HGError.message("服务数据格式发生变化，请稍后重试") }
     }
-    private func fetch(url: URL, body: Data? = nil, headers: [String: String]) async throws -> Data {
+    private func fetch(url: URL, body: Data? = nil, headers: [String: String], timeout: TimeInterval = 18) async throws -> Data {
         try Task.checkCancellation()
         let scheduled = max(Date(), nextRequestAt); nextRequestAt = scheduled.addingTimeInterval(0.26)
         let wait = scheduled.timeIntervalSinceNow
         if wait > 0 { try await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000)) }
         try Task.checkCancellation()
-        var request = URLRequest(url: url, timeoutInterval: 18)
+        var request = URLRequest(url: url, timeoutInterval: timeout)
         request.httpMethod = body == nil ? "GET" : "POST"; request.httpBody = body; request.httpShouldHandleCookies = false
         for (name,value) in headers { request.setValue(value, forHTTPHeaderField: name) }
         let (data,response) = try await session.data(for: request)

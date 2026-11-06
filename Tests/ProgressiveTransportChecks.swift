@@ -28,6 +28,9 @@ func progressiveTransportChecks(root: URL) async throws {
     func configuration() -> URLSessionConfiguration {
         let value = URLSessionConfiguration.ephemeral; value.protocolClasses = [RangeProbeProtocol.self]; return value
     }
+    precondition(MediaRangeHTTP.allowedAfterRedirect(URL(string: "https://a1.vegslb.com/v.mp4?x=1")!) && MediaRangeHTTP.allowedAfterRedirect(URL(string: "https://a1.bdcgslb.com/v.mp4")!))
+    precondition(!MediaRangeHTTP.allowed(URL(string: "https://a1.vegslb.com/v.mp4")!), "a scheduling domain is accepted only after a redirect")
+    precondition(!MediaRangeHTTP.allowedAfterRedirect(URL(string: "http://a1.vegslb.com/v.mp4")!) && !MediaRangeHTTP.allowedAfterRedirect(URL(string: "https://evilvegslb.com/v.mp4")!) && !MediaRangeHTTP.allowedAfterRedirect(URL(string: "https://example.com/v.mp4")!))
     let good = try await MediaRangeHTTP.fetch(url, range: 0..<1024, configuration: configuration())
     guard good.total == 4096, good.data == Data(repeating: 7, count: 1024),
           RangeProbeProtocol.lastRequest?.value(forHTTPHeaderField: "Range") == "bytes=0-1023",
