@@ -148,12 +148,14 @@ private struct ImmersiveFeed: View {
                     }
                     .scrollTargetBehavior(.paging)
                     .scrollIndicators(.hidden)
-                    .scrollPosition(id: $current)
+                    // Anchored at the top so folding or unfolding iPhone Duo keeps the current page whole after the resize.
+                    .scrollPosition(id: $current, anchor: .top)
                     .ignoresSafeArea()
                     .accessibilityIdentifier("immersive_feed")
                     if isLast, let banner { endBanner(banner).padding(.top, insets.top + 64) }
                 }
-                topBar.padding(.top, insets.top)
+                // Side insets too: the iPhone Duo cover screen puts the status bar and camera along the trailing edge.
+                topBar.padding(.top, insets.top).padding(.leading, insets.leading).padding(.trailing, insets.trailing)
             }.ignoresSafeArea()
         }
         .onChange(of: current) { _, _ in prefetch(); syncPreview() }

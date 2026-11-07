@@ -36,8 +36,9 @@ struct DramaPoster: View {
     }
 }
 
-/// Library and account lists use the 剧场 grid: three posters across.
-let threePosterColumns = Array(repeating: GridItem(.flexible(), spacing: 12, alignment: .top), count: 3)
+/// Library and account lists use the 剧场 grid: three posters across on a phone, more on wider screens such as
+/// the unfolded iPhone Duo, so posters keep a phone-like size instead of stretching.
+let threePosterColumns = [GridItem(.adaptive(minimum: 100, maximum: 150), spacing: 12, alignment: .top)]
 
 struct LibraryPosterCell: View {
     let drama: Drama

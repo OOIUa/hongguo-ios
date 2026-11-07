@@ -80,7 +80,7 @@ final class AppModel: ObservableObject {
     @Published var preloadNext: Bool { didSet { UserDefaults.standard.set(preloadNext, forKey: "preloadNext") } }
     @Published var speed: Float { didSet { UserDefaults.standard.set(speed, forKey: "speed") } }
     @Published var tab = 0
-    @Published var systemDark = UIScreen.main.traitCollection.userInterfaceStyle == .dark
+    @Published var systemDark = UITraitCollection.current.userInterfaceStyle == .dark
     @Published var playback: PlaybackRequest?
     @Published var openingDramaID: String?
     @Published var openError: String?
@@ -104,7 +104,7 @@ final class AppModel: ObservableObject {
     }
     /// The scene's traits ignore the windows' override, so this always reads the real system setting.
     func refreshSystemAppearance() {
-        systemDark = (windowScene?.traitCollection ?? UIScreen.main.traitCollection).userInterfaceStyle == .dark
+        systemDark = (windowScene?.traitCollection ?? UITraitCollection.current).userInterfaceStyle == .dark
     }
     func startAppearanceTracking() {
         refreshSystemAppearance()

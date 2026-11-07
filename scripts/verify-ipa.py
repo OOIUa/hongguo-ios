@@ -10,6 +10,9 @@ import tempfile
 import zipfile
 from pathlib import Path
 
+def version_tuple(text):
+    return tuple(int(part) for part in str(text).split('.'))
+
 root = Path(__file__).resolve().parent.parent
 release = json.loads((root / 'Configuration/Release.json').read_text())
 ipa = Path(sys.argv[1]) if len(sys.argv) > 1 else root / f'dist/Hongguo-iOS-{release["version"]}-unsigned.ipa'
@@ -25,6 +28,9 @@ with zipfile.ZipFile(ipa) as archive:
     assert info['MinimumOSVersion'] == release['minimumOSVersion']
     assert info['CFBundleShortVersionString'] == release['version'], 'IPA version differs from Release.json'
     assert info['CFBundleVersion'] == str(release['build']), 'IPA build differs from Release.json'
+    # Older SDKs get classic letterboxing on the iPhone Duo inner display.
+    sdk = info.get('DTPlatformVersion', '0')
+    assert version_tuple(sdk) >= version_tuple(release['minimumBuildSDK']), f'Built with iOS SDK {sdk}; iPhone Duo needs {release["minimumBuildSDK"]} or later'
     assert prefix + 'PureSign.js' in names and prefix + 'BufferRuntime.js' in names
     assert prefix + 'Assets.car' in names
     assert not any(name.endswith('embedded.mobileprovision') for name in names)
@@ -38,7 +44,7 @@ with zipfile.ZipFile(ipa) as archive:
 report = {
     'ipa': ipa.name, 'bytes': ipa.stat().st_size, 'version': info['CFBundleShortVersionString'],
     'build': info['CFBundleVersion'], 'bundle_identifier': info['CFBundleIdentifier'],
-    'minimum_ios': info['MinimumOSVersion'], 'platform': 'iPhoneOS', 'architecture': 'arm64',
+    'minimum_ios': info['MinimumOSVersion'], 'sdk': sdk, 'platform': 'iPhoneOS', 'architecture': 'arm64',
     'unsigned': True, 'signing_resources_present': True,
     'sha256': hashlib.sha256(ipa.read_bytes()).hexdigest()
 }

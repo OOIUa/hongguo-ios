@@ -44,6 +44,8 @@
 
 已在 Xcode 27.1 / iOS 27.1 SDK 构建，部署最低版本为 iOS 17.0，无外部 Swift Package 依赖。需要完整 Xcode 及对应 SDK，许可协议由用户自行确认。
 
+构建须使用 iOS 27.1 或更新的 SDK（`Release.json` 的 `minimumBuildSDK`），iPhone Duo 才会在展开后的内屏全尺寸运行本应用；构建脚本会拒绝更旧的 SDK。
+
 ```sh
 bash scripts/build-unsigned.sh
 ```

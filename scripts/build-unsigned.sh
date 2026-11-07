@@ -3,6 +3,13 @@ set -euo pipefail
 TASK_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$TASK_ROOT"
 mkdir -p build dist
+# iPhone Duo shows apps linked against an older SDK letterboxed at classic iPhone size on its inner display.
+TASK_MIN_SDK="$(/usr/bin/python3 -c 'import json; print(json.load(open("Configuration/Release.json"))["minimumBuildSDK"])')"
+TASK_SDK="$(/usr/bin/xcrun --sdk iphoneos --show-sdk-version)"
+if ! /usr/bin/python3 -c 'import sys; v=lambda s: tuple(int(x) for x in s.split(".")); sys.exit(v(sys.argv[1]) < v(sys.argv[2]))' "$TASK_SDK" "$TASK_MIN_SDK"; then
+    printf 'iOS SDK %s is older than %s; select an Xcode with iOS SDK %s or later (DEVELOPER_DIR) so iPhone Duo runs the app natively.\n' "$TASK_SDK" "$TASK_MIN_SDK" "$TASK_MIN_SDK" >&2
+    exit 1
+fi
 /usr/bin/python3 scripts/generate_project.py
 if ! /usr/bin/xcodebuild -project Hongguo.xcodeproj -scheme Hongguo \
     -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \

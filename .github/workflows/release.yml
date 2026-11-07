@@ -25,7 +25,8 @@ concurrency:
 
 jobs:
   release:
-    runs-on: macos-latest
+    # macos-latest still ships Xcode 26; iPhone Duo runs only apps built with the iOS 27.1+ SDK at full size.
+    runs-on: xcode-27
     timeout-minutes: 40
     env:
       GH_TOKEN: ${{ github.token }}
