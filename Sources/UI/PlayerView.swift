@@ -296,7 +296,7 @@ struct PlayerScreen: View {
 
     private func bottomBar(compact: Bool) -> some View {
         VStack(alignment: .leading, spacing: compact ? 6 : 13) {
-            if !compact { HStack { Text("第 \(visibleEpisode.index) 集").font(.title3.bold()); Spacer(); Text("双击暂停 · 双击两侧快退/快进 · 左侧长按 2×").font(.caption2).foregroundStyle(.white.opacity(0.55)).lineLimit(1).minimumScaleFactor(0.8) } }
+            if !compact { HStack { Text("第 \(visibleEpisode.index) 集").font(.title3.bold()); Spacer(); Text("双击暂停 · 双击两侧快退/快进 · 长按 2×").font(.caption2).foregroundStyle(.white.opacity(0.55)).lineLimit(1).minimumScaleFactor(0.8) } }
             HStack(spacing: 10) {
                 Text(timeLabel(session.scrubbing ? session.previewPosition : session.position)).font(.caption.monospacedDigit()).frame(minWidth: 36)
                 Slider(value: Binding(get: { session.scrubbing ? session.previewPosition : session.position }, set: { session.previewPosition = $0 }), in: 0...max(session.duration, 1), onEditingChanged: session.setSeeking).tint(Color(hex: 0xF08058)).disabled(session.duration <= 0).accessibilityLabel("播放进度")
@@ -411,7 +411,7 @@ private struct VideoGestureView: UIViewRepresentable {
             guard let view = gesture.view, view.bounds.width > 0 else { return nil }
             return gesture.location(in: view).x / view.bounds.width
         }
-        @objc func hold(_ gesture: UILongPressGestureRecognizer) { if gesture.state == .began, let view = gesture.view, gesture.location(in: view).x < view.bounds.width / 2 { parent.holdBegan() }; if [.ended, .cancelled, .failed].contains(gesture.state) { parent.holdEnded() } }
+        @objc func hold(_ gesture: UILongPressGestureRecognizer) { if gesture.state == .began { parent.holdBegan() }; if [.ended, .cancelled, .failed].contains(gesture.state) { parent.holdEnded() } }
         @objc func panned(_ gesture: UIPanGestureRecognizer) {
             guard let view = gesture.view else { return }
             switch gesture.state {

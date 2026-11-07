@@ -89,7 +89,7 @@ final class FeedPreview: ObservableObject {
 
     func markRendered() { rendered = true }
 
-    /// Long-press on the left half: 2× while held, back to normal on release. Paused or ended previews ignore it.
+    /// Long-press anywhere on the picture: 2× while held, back to normal on release. Paused or ended previews ignore it.
     func beginHold() {
         guard let player, rendered, !paused, !ended, !holding else { return }
         holding = true; player.rate = 2
@@ -120,7 +120,7 @@ final class FeedPreview: ObservableObject {
     }
 }
 
-/// Tap and left-half long-press for a feed page. No pan recognizer: vertical paging stays with the scroll view, and a
+/// Tap and long-press for a feed page. No pan recognizer: vertical paging stays with the scroll view, and a
 /// finger that moves before the hold fires lets the scroll view take over.
 struct FeedGestureView: UIViewRepresentable {
     let tap: () -> Void
@@ -142,7 +142,7 @@ struct FeedGestureView: UIViewRepresentable {
         init(_ parent: FeedGestureView) { self.parent = parent }
         @objc func tapped() { parent.tap() }
         @objc func hold(_ gesture: UILongPressGestureRecognizer) {
-            if gesture.state == .began, let view = gesture.view, gesture.location(in: view).x < view.bounds.width / 2 { parent.holdBegan() }
+            if gesture.state == .began { parent.holdBegan() }
             if [.ended, .cancelled, .failed].contains(gesture.state) { parent.holdEnded() }
         }
     }
