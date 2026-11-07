@@ -219,10 +219,16 @@ actor DramaAPI {
         let read: @Sendable (String) async throws -> [String: Any] = readFallback ?? { [self] in try await request(url: try await checkedFallback($0), body: nil, headers: ["User-Agent":PlaybackRegistration.userAgent]) }
         let address = fallbackURL(model["fallback_api"])
         guard !(model["video_list"] as? [Any] ?? []).isEmpty else {
-            return try selectTrack(try fallbackInfo(try await read(address)), requireEncryption: false, minimumPixels: 0)
+            return try await fallbackTrack(try fallbackInfo(try await read(address)), address: address, read: read)
         }
         do {
             return try selectTrack(model, requireEncryption: true, minimumPixels: 0)
+        } catch let onlyByteVC2 as ByteVC2Only {
+            // Inline rows are all ByteVC2: the fallback model, and its compatibility request, may still carry HEVC.
+            guard !address.isEmpty else { throw onlyByteVC2 }
+            let info = try fallbackInfo(try await read(address))
+            try Self.confirmSameVideo(model, info)
+            return try await fallbackTrack(info, address: address, read: read)
         } catch let incomplete as IncompleteEncryption {
             let id = ProtocolJSON.text(model["video_id"]).trimmingCharacters(in: .whitespacesAndNewlines), duration = Double(ProtocolJSON.text(model["video_duration"])) ?? 0
             guard !id.isEmpty, duration > 0, incomplete.minimumPixels > 0, !address.isEmpty else { throw incomplete }
@@ -235,6 +241,44 @@ actor DramaAPI {
     }
 
     private func checkedFallback(_ address: String) throws -> URL { try checkedURL(address, domains: ["fqnovel.com","snssdk.com"]) }
+
+    /// Selects from a fallback model. When every row is ByteVC2, reads the same address once more with the official
+    /// player's compatibility parameters, which served HEVC for such episodes (hongguoTV 0.1.20, issue #56, `265472f`).
+    /// The parameter names do not guarantee a codec, so the answer is still filtered by its actual codec.
+    private func fallbackTrack(_ info: [String: Any], address: String, read: @Sendable (String) async throws -> [String: Any]) async throws -> VideoTrack {
+        do {
+            return try selectTrack(info, requireEncryption: false, minimumPixels: 0)
+        } catch let onlyByteVC2 as ByteVC2Only {
+            guard let compatible = compatibleFallback(address) else { throw onlyByteVC2 }
+            let other = try fallbackInfo(try await read(compatible))
+            try Self.confirmSameVideo(info, other)
+            return try selectTrack(other, requireEncryption: false, minimumPixels: 0)
+        }
+    }
+
+    func compatibleFallback(_ address: String) -> String? {
+        // Keep the other parameters byte-for-byte: decoding and re-encoding could turn a signed "%2B" into "+".
+        guard var parts = URLComponents(string: cleanURL(address)) else { return nil }
+        var items = (parts.percentEncodedQueryItems ?? []).filter { $0.name != "codec_type" && $0.name != "force_codec" }
+        items += [URLQueryItem(name: "codec_type", value: "0"), URLQueryItem(name: "force_codec", value: "h264")]
+        parts.percentEncodedQueryItems = items
+        return parts.string
+    }
+
+    /// A replacement model must not name another video or another full duration where both sides declare them.
+    private static func confirmSameVideo(_ reference: [String: Any], _ other: [String: Any]) throws {
+        let id = ProtocolJSON.text(reference["video_id"]).trimmingCharacters(in: .whitespacesAndNewlines)
+        let otherID = ProtocolJSON.text(other["video_id"]).trimmingCharacters(in: .whitespacesAndNewlines)
+        let duration = Double(ProtocolJSON.text(reference["video_duration"])) ?? 0, otherDuration = Double(ProtocolJSON.text(other["video_duration"])) ?? 0
+        if (!id.isEmpty && !otherID.isEmpty && id != otherID) || (duration > 0 && otherDuration > 0 && abs(duration - otherDuration) > 0.5) {
+            throw HGError.message("备用片源编号或完整时长无法确认，已停止取址")
+        }
+    }
+
+    /// Every offered row is ByteVC2, which AVPlayer cannot decode.
+    private struct ByteVC2Only: LocalizedError {
+        var errorDescription: String? { "本集仅提供播放器不支持的 ByteVC2 编码，当前无法播放，请在官方 App 观看" }
+    }
 
     private func fallbackInfo(_ outer: [String: Any]) throws -> [String: Any] {
         let outerInfo = ProtocolJSON.dictionary(outer["video_info"])
@@ -261,9 +305,9 @@ actor DramaAPI {
             let pixels = shortSide > 0 ? shortSide : Int(quality.filter(\.isNumber)) ?? 0
             return (item,rank,pixels,shortSide,quality)
         }.sorted { $0.rank == $1.rank ? $0.pixels > $1.pixels : $0.rank < $1.rank }
-        // Codecs are locked per episode: no parameter, identity or endpoint yields another (hongguoTV 0.1.16, hongguo-drama 5.6).
-        if compatible.isEmpty, items.contains(where: { firstText($0["codec_type"],ProtocolJSON.dictionary($0["video_meta"])["codec_type"]).lowercased() == "bytevc2" }) {
-            throw HGError.message("本集仅提供播放器不支持的 ByteVC2 编码，当前无法播放，请在官方 App 观看")
+        // Only the fallback compatibility request has been seen to change the codec (see fallbackTrack).
+        if compatible.isEmpty, items.contains(where: { ["bytevc2","bvc2"].contains(firstText($0["codec_type"],ProtocolJSON.dictionary($0["video_meta"])["codec_type"]).lowercased()) }) {
+            throw ByteVC2Only()
         }
         let rows = compatible.filter { minimumPixels == 0 || $0.shortSide >= minimumPixels }
         var incomplete = false

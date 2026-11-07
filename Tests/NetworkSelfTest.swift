@@ -70,74 +70,130 @@ import JavaScriptCore
         precondition(feed.dramas[0].coverURL == "https://p3.example.invalid/a.jpg" && feed.dramas[0].episodeCount == 80)
         precondition((try? GuessFeed.parse(["code": 1])) == nil)
         precondition((try? GuessFeed.parse(["code": 0, "data": ["tab_item": [["tab_type": 16, "session_id": "a\nb"]]]])) == nil)
-        final class Calls: @unchecked Sendable { var values = [(String, Int)]() }
+        final class Calls: @unchecked Sendable { var values = [GuessCursor]() }
+        let drama = { (id: Int) in Drama(id: "73000000000000\(id)", title: "剧", coverURL: "", summary: "", episodeCount: 1) }
         let calls = Calls()
-        let pager = GuessPager(owner: nil) { cursor, offset in
-            calls.values.append((cursor, offset))
-            return GuessBatch(dramas: (0..<3).map { Drama(id: "73000000000000\(offset * 3 + $0)", title: "剧", coverURL: "", summary: "", episodeCount: 1) },
-                              session: offset == 0 ? "srv" : "")
+        let pager = GuessPager(owner: nil) { cursor in
+            calls.values.append(cursor)
+            var next = cursor; next.offset += 3; next.session = "srv"
+            return GuessBatch(dramas: (0..<3).map { drama(cursor.offset + $0) }, session: "srv", served: 3, cursor: next)
         }
         let first = try await pager.next()
         precondition(first.dramas.count == 6 && first.nextOffset == 2 && first.hasMore)
-        precondition(calls.values.map(\.0) == ["", "srv"] && calls.values.map(\.1) == [0, 1])
-        _ = try await pager.next()
-        precondition(calls.values.last?.0 == "srv", "an empty session must not overwrite the server session")
-        let repeating = GuessPager(owner: nil) { _, _ in GuessBatch(dramas: [Drama(id: "7300000000000000001", title: "剧", coverURL: "", summary: "", episodeCount: 1)], session: "") }
+        precondition(calls.values.map(\.offset) == [0, 3] && calls.values[1].session == "srv" && calls.values[1].filterIDs.count == 3)
+        let second = try await pager.next()
+        precondition(second.nextOffset > first.nextOffset)
+        let repeating = GuessPager(owner: nil) { cursor in
+            var next = cursor; next.offset += 1
+            return GuessBatch(dramas: [drama(1)], session: "", cursor: next)
+        }
         let once = try await repeating.next(); precondition(once.dramas.count == 1)
         let ended = try await repeating.next()
         precondition(ended.dramas.isEmpty && !ended.hasMore)
+        // A refresh by the same owner keeps dedupe and reports that nothing new arrived; another owner starts clean.
+        let refreshed = GuessPager(owner: nil, previous: repeating) { cursor in GuessBatch(dramas: [drama(1)], session: "", cursor: cursor) }
+        do { _ = try await refreshed.next(); fatalError("Replaying old works must be reported") }
+        catch let error as HGError { precondition(error.localizedDescription.contains("最近已去重 1 部")) }
+        let other = GuessPager(owner: UUID(), previous: repeating) { cursor in GuessBatch(dramas: [drama(1)], session: "", cursor: cursor) }
+        let otherPage = try await other.next(); precondition(otherPage.dramas.count == 1)
         // A non-zero code moves to the next host from the start; an error thrown by the fetch does not move at all.
         let feedObject = try ProtocolJSON.object(Data(#"{"code":0,"data":{"tab_item":[{"tab_type":16,"session_id":"fresh"}]}}"#.utf8))
+        func cursor(_ session: String, _ offset: Int) -> GuessCursor { var c = GuessCursor(); c.session = session; c.offset = offset; return c }
         var attempts = [URLRequest]()
-        let recovered = try await GuessFeed.batch(account: account, session: "stale", offset: 3) { request in
+        let recovered = try await GuessFeed.batch(account: account, cursor: cursor("stale", 3)) { request in
             attempts.append(request)
             return attempts.count < 3 ? ["code": 110] : feedObject
         }
-        precondition(recovered.restarted && recovered.session == "fresh")
+        precondition(recovered.restarted && recovered.session == "fresh" && recovered.cursor.session == "fresh" && recovered.cursor.offset == 1)
         precondition(attempts.map { $0.url!.host! } == GuessFeed.hosts && Set(GuessFeed.hosts).count == 3)
         let staleQuery = URLComponents(url: attempts[0].url!, resolvingAgainstBaseURL: false)!.queryItems!
         precondition(value(staleQuery, "session_id") == "stale" && value(staleQuery, "offset") == "3")
         let retryQuery = URLComponents(url: attempts[1].url!, resolvingAgainstBaseURL: false)!.queryItems!
         precondition(value(retryQuery, "session_id") == nil && value(retryQuery, "offset") == "0" && value(retryQuery, "client_req_type") == "1")
         precondition(attempts[1].value(forHTTPHeaderField: "Cookie") == account.cookie)
-        let direct = try await GuessFeed.batch(account: nil, session: "srv", offset: 1) { _ in feedObject }
+        let direct = try await GuessFeed.batch(account: nil, cursor: cursor("srv", 1)) { _ in feedObject }
         precondition(!direct.restarted)
         var exhausted = 0
         do {
-            _ = try await GuessFeed.batch(account: nil, session: "", offset: 0) { _ in exhausted += 1; return ["code": 110] }
+            _ = try await GuessFeed.batch(account: nil, cursor: GuessCursor()) { _ in exhausted += 1; return ["code": 110] }
             fatalError("Every host answering 110 must be reported")
         } catch let error as HGError { precondition(exhausted == 3 && error.localizedDescription.contains("110")) }
         var failures = 0
         do {
-            _ = try await GuessFeed.batch(account: nil, session: "", offset: 0) { _ in failures += 1; throw HGError.message("HTTP 500") }
+            _ = try await GuessFeed.batch(account: nil, cursor: GuessCursor()) { _ in failures += 1; throw HGError.message("HTTP 500") }
             fatalError("A fetch failure must be reported")
         } catch is HGError { precondition(failures == 1) }
-        // The server's offset counts rows, so a batch advances it by the rows served.
-        let strideCalls = Calls()
-        let striding = GuessPager(owner: nil) { cursor, offset in
-            strideCalls.values.append((cursor, offset))
-            return GuessBatch(dramas: (0..<3).map { Drama(id: "7400000000000\(offset)\($0)", title: "剧", coverURL: "", summary: "", episodeCount: 1) },
-                              session: "srv", served: offset == 0 ? 3 : 6)
+        // No 30-card cap; the entry's offset advances by the rows served.
+        let rows = (0..<45).map { #"{"series_id":"\#(7600000000000000000 + $0)","series_title":"作品\#($0)"}"# }.joined(separator: ",")
+        let large = try ProtocolJSON.object(Data(#"{"code":0,"data":{"tab_item":[{"tab_type":16,"cell_data":[{"cell_data":[{"video_data":[\#(rows)]}]}]}]}}"#.utf8))
+        let largeBatch = try await GuessFeed.batch(account: nil, cursor: GuessCursor()) { _ in large }
+        precondition(largeBatch.dramas.count == 45 && largeBatch.cursor.offset == 45)
+        // Signed form: shared registered identity, 7.4.3.32, registration cookie; signed in, the account cookie.
+        let registered = RegisteredIdentity(deviceID: "3333333333333333", installID: "4444444444444444", cdid: "cdid-test", appDeviceCookie: "install_id=4444444444444444")
+        final class Signs: @unchecked Sendable { var values = [(String, [[String]], [String: String])]() }
+        let signs = Signs()
+        let fakeSign: GuessFeed.Sign = { base, query, device in
+            signs.values.append((base, query, device))
+            let text = base + "?" + query.map { $0[0] + "=" + $0[1].addingPercentEncoding(withAllowedCharacters: .alphanumerics)! }.joined(separator: "&") + "&_rticket=1"
+            return SignedProtocolRequest(url: URL(string: text)!, headers: ["x-medusa": "signed", "x-ss-req-ticket": "1"])
         }
-        let stridePage = try await striding.next()
-        precondition(strideCalls.values.map(\.1) == [0, 3] && stridePage.nextOffset == 9)
-        // A restarted batch replaces the rejected pagination and shown cards stay filtered out.
-        let restartCalls = Calls()
-        let drama = { (id: Int) in Drama(id: "73000000000000\(id)", title: "剧", coverURL: "", summary: "", episodeCount: 1) }
-        let restarting = GuessPager(owner: nil) { cursor, offset in
-            restartCalls.values.append((cursor, offset))
-            switch restartCalls.values.count {
-            case 1: return GuessBatch(dramas: (0..<6).map(drama), session: "old")
-            case 2: return GuessBatch(dramas: [0, 6, 7, 8, 9, 10, 11].map(drama), session: "", restarted: true)
-            default: return GuessBatch(dramas: [drama(12)], session: "new")
-            }
+        var signedRequests = [URLRequest]()
+        let infinite = try ProtocolJSON.object(Data(#"{"code":0,"data":{"tab_item":[{"tab_type":16,"session_id":"srv","bottom_unlimited":true,"client_template":7,"bookstore_id":"8001","version_tag":"fixture-v7","cell_data":[{"cell_id":"9001","cell_data":[{"video_data":[{"series_id":"7600000000000000101","series_title":"甲"}]}]}]}]}}"#.utf8))
+        let entry = try await GuessFeed.batch(account: nil, cursor: GuessCursor(), identity: { registered }, sign: fakeSign) { request in
+            signedRequests.append(request); return infinite
         }
-        _ = try await restarting.next()
-        let afterRestart = try await restarting.next()
-        precondition(afterRestart.dramas.count == 6 && afterRestart.nextOffset == 1)
-        _ = try await restarting.next()
-        precondition(restartCalls.values.prefix(3).map(\.0) == ["", "old", ""] && restartCalls.values.prefix(3).map(\.1) == [0, 1, 1])
-        print("PASS: 猜你喜欢 anonymous/signed-in request, parsing, pager batching and host rotation.")
+        precondition(entry.cursor.flow == GuessFlow(cellID: "9001", planID: "8001", versionTag: "fixture-v7") && entry.cursor.offset == 0)
+        precondition(entry.cursor.identityID == registered.deviceID)
+        let signedQuery0 = URLComponents(url: signedRequests[0].url!, resolvingAgainstBaseURL: false)!.queryItems!
+        precondition(signedRequests[0].url!.absoluteString.contains(GuessFeed.entryPath + "?") && signedRequests[0].value(forHTTPHeaderField: "x-medusa") == "signed")
+        precondition(value(signedQuery0, "device_id") == registered.deviceID && value(signedQuery0, "iid") == registered.installID)
+        precondition(value(signedQuery0, "version_code") == "74332" && value(signedQuery0, "version_name") == "7.4.3.32" && value(signedQuery0, "pv_player") == "74332")
+        precondition(signedQuery0.filter { $0.name == "_rticket" }.count == 1 && signs.values[0].2["version_name"] == "7.4.3.32")
+        precondition(signedRequests[0].value(forHTTPHeaderField: "User-Agent")!.hasPrefix("com.phoenix.read/74332"))
+        precondition(signedRequests[0].value(forHTTPHeaderField: "Cookie") == registered.appDeviceCookie)
+        // The cell continuation uses the server cursor and filter_ids.
+        var continued = entry.cursor; continued.filterIDs = ["7600000000000000101"]
+        let cellObject = try ProtocolJSON.object(Data(#"{"code":0,"data":{"next_offset":6,"session_id":"cell-session","has_more":false,"cell_view":{"cell_data":[{"video_data":[{"series_id":"7600000000000000102","series_title":"乙"}]}]}}}"#.utf8))
+        let cell = try await GuessFeed.batch(account: account, cursor: continued, identity: { registered }, sign: fakeSign) { request in
+            signedRequests.append(request); return cellObject
+        }
+        precondition(cell.dramas.map(\.id) == ["7600000000000000102"] && cell.cursor.offset == 6 && cell.cursor.session == "cell-session")
+        let cellQuery = URLComponents(url: signedRequests[1].url!, resolvingAgainstBaseURL: false)!.queryItems!
+        precondition(signedRequests[1].url!.absoluteString.contains(GuessFeed.cellPath + "?") && value(cellQuery, "cell_id") == "9001" && value(cellQuery, "plan_id") == "8001")
+        precondition(value(cellQuery, "version_tag") == "fixture-v7" && value(cellQuery, "client_template") == "7" && value(cellQuery, "change_type") == "0")
+        precondition(value(cellQuery, "client_req_type") == "2" && value(cellQuery, "filter_ids") == "7600000000000000101" && value(cellQuery, "offset") == "0")
+        precondition(signedRequests[1].value(forHTTPHeaderField: "Cookie") == account.cookie && value(cellQuery, "device_id") == registered.deviceID)
+        let stalled = try ProtocolJSON.object(Data(#"{"code":0,"data":{"next_offset":0,"cell_view":{"cell_data":[]}}}"#.utf8))
+        do { _ = try await GuessFeed.batch(account: nil, cursor: entry.cursor, identity: { registered }, sign: fakeSign) { _ in stalled }; fatalError("A stalled cursor must be reported") }
+        catch let error as HGError { precondition(error.localizedDescription.contains("游标未前进")) }
+        // A changed identity reads the entry again.
+        let renewed = RegisteredIdentity(deviceID: "5555555555555555", installID: "6666666666666666", cdid: "cdid-2", appDeviceCookie: "")
+        var reread: URLRequest?
+        let afterChange = try await GuessFeed.batch(account: nil, cursor: cell.cursor, identity: { renewed }, sign: fakeSign) { request in reread = request; return feedObject }
+        precondition(afterChange.restarted && reread!.url!.absoluteString.contains(GuessFeed.entryPath + "?") && value(URLComponents(url: reread!.url!, resolvingAgainstBaseURL: false)!.queryItems!, "offset") == "0")
+        // An explicit 110 on a signed request falls back to the unsigned form for the round.
+        var fallback = [URLRequest]()
+        let unsignedBatch = try await GuessFeed.batch(account: account, cursor: GuessCursor(), identity: { registered }, sign: fakeSign) { request in
+            fallback.append(request); return fallback.count == 1 ? ["code": 110] : feedObject
+        }
+        precondition(unsignedBatch.cursor.unsigned && fallback[1].value(forHTTPHeaderField: "x-medusa") == nil)
+        precondition(value(URLComponents(url: fallback[1].url!, resolvingAgainstBaseURL: false)!.queryItems!, "device_id") == nil)
+        precondition(fallback[1].value(forHTTPHeaderField: "Cookie") == account.cookie)
+        // An empty reply to a signed request drops that identity and rereads the entry on the next host.
+        var forgotten = [String](), emptyCalls = 0
+        let afterEmpty = try await GuessFeed.batch(account: nil, cursor: cursor("stale", 3), identity: { registered },
+                                                   forget: { forgotten.append($0.deviceID) }, sign: fakeSign) { _ in
+            emptyCalls += 1; if emptyCalls == 1 { throw GuessEmptyResponse() }; return feedObject
+        }
+        precondition(afterEmpty.restarted && forgotten == [registered.deviceID])
+        // An entry without a complete context keeps tab paging.
+        let partial = try ProtocolJSON.object(Data(#"{"code":0,"data":{"tab_item":[{"tab_type":16,"bottom_unlimited":true,"client_template":7,"bookstore_id":"bad","cell_data":[{"cell_id":"9001","cell_data":[{"video_data":[{"series_id":"7600000000000000101","series_title":"甲"}]}]}]}]}}"#.utf8))
+        precondition(GuessFeed.cellFlow(partial) == nil && GuessFeed.cellFlow(infinite) != nil)
+        // The real signer produces the official header set for this query shape.
+        let realSigned = try await GuessFeed.signedRequest(account: nil, cursor: GuessCursor(), identity: registered, host: GuessFeed.hosts[0],
+                                                           sign: { base, query, device in try await ProtocolSigner(resourceDirectory: URL(fileURLWithPath: CommandLine.arguments[1]).appendingPathComponent("Sources/Networking")).signedRequest(baseURL: base, query: query, body: nil, device: device) })
+        for header in ["x-gorgon", "x-khronos", "x-medusa", "x-helios", "x-ss-req-ticket"] { precondition(realSigned.value(forHTTPHeaderField: header) != nil, header) }
+        print("PASS: 猜你喜欢 unsigned/signed request, cell continuation, fallback, parsing, pager batching and host rotation.")
         // Related works: playable types only, season numbering, and the next season after the gap.
         func relatedRow(_ id: String, _ type: Int, _ tag: String, episodes: Int = 80, extra: String = "") -> String {
             #"{"series_id":"\#(id)","title":"作品\#(id)","content_type":\#(type),"episode_cnt":\#(episodes),"cover":"https:\/\/p.example.invalid\/\#(id).jpg","video_desc":"简介","tag_info":{"text":"\#(tag)"}\#(extra)}"#
@@ -209,6 +265,31 @@ import JavaScriptCore
         do {
             _ = try await trackAPI.modelTrack(["video_list":[videoRow("bytevc2","https://v1.qznovelvod.com/a.mp4",1080)]])
             fatalError("A ByteVC2-only episode has no playable track")
+        } catch { precondition(error.localizedDescription.contains("ByteVC2")) }
+        // All-ByteVC2 episodes read the fallback, then once more with codec_type=0&force_codec=h264 (hongguoTV 0.1.20).
+        final class Reads: @unchecked Sendable { var urls = [String]() }
+        @Sendable func codecReply(_ codec: String, id: String = "v0vc2", duration: Double = 60) -> [String: Any] {
+            ["video_info":["data":["video_id":id,"video_duration":duration,"video_list":["video_1":videoRow(codec,"https://v1.qznovelvod.com/\(codec).mp4",720)]]]]
+        }
+        let vc2Model: [String: Any] = ["video_list":[videoRow("bytevc2","https://v1.qznovelvod.com/a.mp4",1080)],"video_id":"v0vc2","video_duration":60.0,
+                                       "fallback_api":"https://vod.snssdk.com/video/fallback?sig=a%2Bb&codec_type=3"]
+        let reads = Reads()
+        let swapped = try await trackAPI.modelTrack(vc2Model) { url in
+            reads.urls.append(url); return codecReply(url.contains("force_codec") ? "hevc" : "bvc2")
+        }
+        precondition(swapped.url.absoluteString == "https://v1.qznovelvod.com/hevc.mp4" && reads.urls.count == 2)
+        precondition(reads.urls[0] == "https://vod.snssdk.com/video/fallback?sig=a%2Bb&codec_type=3")
+        precondition(reads.urls[1] == "https://vod.snssdk.com/video/fallback?sig=a%2Bb&codec_type=0&force_codec=h264", reads.urls[1])
+        let bareModel: [String: Any] = ["fallback_api":"https://vod.snssdk.com/video/fallback"]
+        let bare = try await trackAPI.modelTrack(bareModel) { url in codecReply(url.contains("force_codec") ? "h264" : "bytevc2") }
+        precondition(bare.url.absoluteString == "https://v1.qznovelvod.com/h264.mp4")
+        for compat in [codecReply("bytevc2"), codecReply("hevc", id: "v0other"), codecReply("hevc", duration: 30)] {
+            let refused = try? await trackAPI.modelTrack(vc2Model) { url in url.contains("force_codec") ? compat : codecReply("bytevc2") }
+            precondition(refused == nil, "A compatibility answer that is still ByteVC2 or names another video must not play")
+        }
+        do {
+            _ = try await trackAPI.modelTrack(vc2Model) { _ in codecReply("bytevc2") }
+            fatalError("A compatibility answer that stays ByteVC2 must be reported")
         } catch { precondition(error.localizedDescription.contains("ByteVC2")) }
         let incompleteModel: [String: Any] = ["video_list":[videoRow("h264","https://v1.qznovelvod.com/nokey.mp4",1080)],"video_id":"v0abc","video_duration":60.0,"fallback_api":"https://vod.snssdk.com/video/fallback"]
         let spadeSample = "k7wd8lO6G/dhixnESLgG9k2BCvxFtxX+Xrkl8my/EvVBugmCgg=="

@@ -48,3 +48,17 @@ On 2026-10-27 the upstream playback endpoint began rejecting per-request synthet
   https://github.com/sunnysky123/hongguo-web/tree/79babdfefb6a80284e371b1ba14be897f7988c96
 
 Local changes: the registered identity (device_id / iid / cdid only) is kept in process memory and is fully separate from the personal account module; no device token, cookie or raw response is stored. Successful registration is shared by playback, prefetch and retries; a failed registration is reused only for a 30-second cooldown instead of until process restart, because an Android process may first play while offline and then stay resident.
+
+Signed recommendation feed and cell continuation (2026-11)
+
+- tsukiyo-zero/hongguoTV TV 0.1.26, commits `3d319a6` and `62910e0` (2026-11-06), GPL-3.0-only — `kotlin-tv/core/.../RecommendationFeed.kt` and `PlaybackDeviceSession.kt`.
+  https://github.com/tsukiyo-zero/hongguoTV/tree/70edaff/kotlin-tv
+
+`GuessFeed` signs recommendation requests with a registered anonymous identity shared by this process's recommendations and the 7.4.3.32 context, switches to `bookmall/cell/change/v1/` with the server's `next_offset` when the entry declares `bottom_unlimited` with template 7, and returns to the unsigned form on an explicit 110. Local changes: playback keeps registering a fresh identity per request; a failed registration falls back to the unsigned request; an empty signed reply drops the identity; `filter_ids` carries at most 120 recent ids; a refresh keeps the last 540 shown ids and reports when nothing new arrives. Anonymous live check on 2026-11-07: 10 pages, 86 distinct works; signed-in recommendations are not verified with a real account.
+
+ByteVC2 compatibility request (2026-11)
+
+- tsukiyo-zero/hongguoTV TV 0.1.20, commit `265472f2d310f1f979dfcbb325e9453c6582fc96` (2026-11-04, issue #56), GPL-3.0-only — `kotlin-tv/core/.../ContentRepository.kt`.
+  https://github.com/tsukiyo-zero/hongguoTV/tree/265472f2d310f1f979dfcbb325e9453c6582fc96/kotlin-tv
+
+When every rendition of the fallback model is ByteVC2, `DramaAPI.fallbackTrack` reads the same `fallback_api` once more with `codec_type=0&force_codec=h264`, the official player's compatibility parameters, which gave upstream HEVC for such episodes. Local changes: inline models whose rows are all ByteVC2 also go to the fallback; other query parameters are kept byte-for-byte; the answer is still filtered by its actual codec, and a replacement that declares another video id or a full duration more than 0.5 s apart is refused. Not verified against a live ByteVC2-only episode.

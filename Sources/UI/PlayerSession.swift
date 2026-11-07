@@ -21,6 +21,8 @@ final class PlayerSession: ObservableObject {
     @Published private(set) var rendered = false
     @Published private(set) var holding = false
     @Published private(set) var endMessage: String?
+    /// The picture's display size; zero until the first video format is known.
+    @Published private(set) var videoSize: CGSize = .zero
     private var finished = false
     @Published var scrubbing = false
     @Published var previewPosition: Double = 0
@@ -65,7 +67,7 @@ final class PlayerSession: ObservableObject {
         let saved = startAt ?? (recordsLocalHistory ? app.library.progress(for: detail.drama.id).flatMap { $0.episodeID == nextEpisode.id ? $0.position : nil } : nil) ?? 0
         position = saved; duration = 0; previewPosition = saved
         preparing = true; stage = "正在获取播放地址"; progress = 0; error = nil
-        rendered = false; endMessage = nil; holding = false; scrubbing = false; prefetchStarted = false; finished = false
+        rendered = false; endMessage = nil; holding = false; videoSize = .zero; scrubbing = false; prefetchStarted = false; finished = false
         requestTask = Task { [weak self] in
             do {
                 let item: AVPlayerItem
@@ -115,6 +117,10 @@ final class PlayerSession: ObservableObject {
                 let length = item.duration.seconds
                 if length.isFinite && length > 0 { self.duration = length }
             }
+        })
+        observations.append(item.observe(\.presentationSize, options: [.initial, .new]) { [weak self] item, _ in
+            let size = item.presentationSize
+            Task { @MainActor in guard let self, self.playID == ticket, size.width > 0, size.height > 0 else { return }; self.videoSize = size }
         })
         observations.append(next.observe(\.timeControlStatus, options: [.initial, .new]) { [weak self] player, _ in
             Task { @MainActor in guard let self, self.playID == ticket else { return }; self.isPlaying = player.timeControlStatus == .playing; self.buffering = player.timeControlStatus == .waitingToPlayAtSpecifiedRate; if !self.isPlaying { self.endHold() } }

@@ -7,6 +7,7 @@ struct PlayerScreen: View {
     @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var library: LibraryStore
     @StateObject private var session: PlayerSession
+    @StateObject private var surface = PlayerSurface()
     @State private var episodesVisible = false
     @State private var speedsVisible = false
     // Page drag: the current picture follows the finger and the neighbouring episode number slides in.
@@ -17,36 +18,48 @@ struct PlayerScreen: View {
     @State private var slideTarget: Int?
     /// 清屏: only the picture remains until a tap or an inward pinch brings the controls back.
     @State private var cleanScreen = false
+    /// Landscape is full-screen viewing, whether 全屏观看 turned the screen or the user did: a tap shows or hides the
+    /// controls, and episodes change from the controls, the episode sheet or autoplay rather than by swiping.
+    @State private var landscape = false
     /// Holding for 2× hides the same elements, for as long as the hold lasts.
     private var chromeHidden: Bool { cleanScreen || session.holding }
+    /// Just under a picture wider than tall, as in the official app.
+    private var fullScreenOffered: Bool {
+        !landscape && !chromeHidden && session.rendered && session.error == nil && !dragging && !sliding && !surface.pipActive
+            && session.videoSize.width > session.videoSize.height
+    }
 
     init(request: PlaybackRequest, model: AppModel) { _session = StateObject(wrappedValue: PlayerSession(request: request, app: model)) }
 
     var body: some View {
         GeometryReader { geometry in
             ZStack {
-                Color.black.ignoresSafeArea()
-                GeometryReader { full in
-                    pages(height: full.size.height)
-                        .onAppear { pageHeight = max(full.size.height, 1) }
-                        .onChange(of: full.size.height) { _, height in pageHeight = max(height, 1) }
-                }.ignoresSafeArea().allowsHitTesting(false)
                 VStack(spacing: 0) {
                     // The insets keep touches near the controls from pausing; with the controls gone the whole screen responds.
                     Color.clear.frame(height: cleanScreen ? 0 : (geometry.size.height < 420 ? 58 : 70)).allowsHitTesting(false)
                     VideoGestureView(enabled: !sliding && !episodesVisible && !speedsVisible && !session.scrubbing,
                                      tap: videoTapped, holdBegan: session.beginHold, holdEnded: session.endHold,
                                      dragChanged: dragChanged, dragEnded: dragEnded, dragCancelled: dragCancelled,
-                                     pinched: { cleanScreen = $0 })
-                        .accessibilityElement().accessibilityLabel("视频画面").accessibilityHint(cleanScreen ? "轻点退出清屏" : "轻点暂停或继续，上下拖动切换剧集").accessibilityAddTraits(.isButton)
+                                     pinched: { if !landscape { cleanScreen = $0 } })
+                        .accessibilityElement().accessibilityLabel("视频画面").accessibilityHint(landscape ? (cleanScreen ? "轻点显示控制栏" : "轻点隐藏控制栏") : cleanScreen ? "轻点退出清屏" : "轻点暂停或继续，上下拖动切换剧集").accessibilityAddTraits(.isButton)
                         .accessibilityAction { videoTapped() }
                         .accessibilityAction(named: cleanScreen ? "退出清屏" : "清屏播放") { cleanScreen.toggle() }
                         .accessibilityAction(named: "下一集") { session.next() }
                         .accessibilityAction(named: "上一集") { session.previous() }
                     Color.clear.frame(height: cleanScreen ? 0 : (geometry.size.height < 420 ? 112 : 174)).allowsHitTesting(false)
                 }.ignoresSafeArea(edges: cleanScreen ? .all : []).zIndex(1)
-                LinearGradient(colors: [.black.opacity(0.55), .clear], startPoint: .top, endPoint: .bottom).frame(height: 150).frame(maxHeight: .infinity, alignment: .top).opacity(chromeHidden ? 0 : 1).allowsHitTesting(false)
-                LinearGradient(colors: [.clear, .black.opacity(0.9)], startPoint: .top, endPoint: .bottom).frame(height: min(geometry.size.height * 0.45, 300)).frame(maxHeight: .infinity, alignment: .bottom).opacity(chromeHidden ? 0 : 1).allowsHitTesting(false)
+                if fullScreenOffered {
+                    GeometryReader { full in
+                        let pictureHeight = min(full.size.height, full.size.width * session.videoSize.height / session.videoSize.width)
+                        Button(action: enterFullScreen) {
+                            Label("全屏观看", systemImage: "rotate.right").font(.footnote.weight(.medium))
+                                .padding(.horizontal, 13).padding(.vertical, 8).background(.white.opacity(0.14), in: RoundedRectangle(cornerRadius: 8))
+                        }.buttonStyle(.plain).accessibilityIdentifier("player.fullScreen")
+                        .position(x: full.size.width / 2, y: (full.size.height + pictureHeight) / 2 + 30)
+                    }.ignoresSafeArea().zIndex(1.5).transition(.opacity)
+                }
+                LinearGradient(colors: [.black.opacity(0.55), .clear], startPoint: .top, endPoint: .bottom).frame(height: 150).frame(maxHeight: .infinity, alignment: .top).ignoresSafeArea().opacity(chromeHidden ? 0 : 1).allowsHitTesting(false)
+                LinearGradient(colors: [.clear, .black.opacity(0.9)], startPoint: .top, endPoint: .bottom).frame(height: min(geometry.size.height * 0.45, 300)).frame(maxHeight: .infinity, alignment: .bottom).ignoresSafeArea().opacity(chromeHidden ? 0 : 1).allowsHitTesting(false)
                 VStack(spacing: 0) {
                     chrome { topBar }
                     Spacer(minLength: 10)
@@ -61,15 +74,44 @@ struct PlayerScreen: View {
                     Spacer(minLength: 10)
                     if let end = session.endMessage { chrome { Text(end).font(.caption).foregroundStyle(.white.opacity(0.8)).padding(.bottom, 12) } }
                     chrome { bottomBar(compact: geometry.size.height < 420) }
-                }.padding(.horizontal, 20).padding(.top, 6).padding(.bottom, 12).zIndex(2).allowsHitTesting(!sliding)
+                }.padding(.horizontal, 20).padding(.top, 6).padding(.bottom, landscape ? 0 : 12).zIndex(2).allowsHitTesting(!sliding)
             }.foregroundStyle(.white)
             .animation(.easeOut(duration: 0.18), value: chromeHidden)
-        }.background(.black).preferredColorScheme(.dark).statusBarHidden(chromeHidden).persistentSystemOverlays(chromeHidden ? .hidden : .automatic)
+        }
+        // The picture sits behind everything at the full screen size, under the home indicator and the camera
+        // housing as well, so full screen reaches every edge whatever space the controls take.
+        .background {
+            GeometryReader { full in
+                pages(height: full.size.height)
+                    .onAppear { pageHeight = max(full.size.height, 1); landscape = full.size.width > full.size.height }
+                    .onChange(of: full.size) { _, size in pageHeight = max(size.height, 1); landscape = size.width > size.height }
+            }.background(.black).ignoresSafeArea().allowsHitTesting(false)
+        }
+        .preferredColorScheme(.dark).statusBarHidden(chromeHidden).persistentSystemOverlays(chromeHidden ? .hidden : .automatic)
             .sheet(isPresented: $episodesVisible) { episodeSheet }
             .sheet(isPresented: $speedsVisible) { speedSheet }
-            .task { session.onSlide = { target in slide(to: target) }; session.start() }
-            .onDisappear { session.stop() }
-            .onChange(of: scenePhase) { _, phase in if phase != .active { session.suspend() } }
+            .task {
+                surface.bind(session)
+                surface.closedInBackground = { session.suspend() }
+                session.onSlide = { target in slide(to: target) }; session.start()
+            }
+            .onDisappear { session.stop(); surface.unbind(); InterfaceOrientationLock.lock(InterfaceOrientationLock.free, rotate: false) }
+            // Only a real move to the background pauses: an episode that is playing then goes on in the small window
+            // (the system starts it as the app leaves), and anything else stops as before.
+            .onChange(of: scenePhase) { _, phase in
+                guard phase == .background, !surface.pipActive, !surface.pipStarting else { return }
+                Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(700))
+                    if UIApplication.shared.applicationState == .background, !surface.pipActive, !surface.pipStarting { session.suspend() }
+                }
+            }
+            .onChange(of: landscape) { _, _ in cleanScreen = false }
+            // In full screen the controls step aside after a few seconds of playback.
+            .task(id: autoHideKey) {
+                guard landscape, !cleanScreen, session.isPlaying, !session.scrubbing, !episodesVisible, !speedsVisible else { return }
+                try? await Task.sleep(for: .seconds(4))
+                if !Task.isCancelled { cleanScreen = true }
+            }
             .onChange(of: episodesVisible) { _, shown in if shown { session.endHold() } }
             .onChange(of: speedsVisible) { _, shown in if shown { session.endHold() } }
             .onChange(of: session.app.preloadNext) { _, _ in session.preferencesChanged() }
@@ -81,7 +123,15 @@ struct PlayerScreen: View {
             }
     }
 
-    private func videoTapped() { if cleanScreen { cleanScreen = false } else { session.toggle() } }
+    private func videoTapped() {
+        if landscape { cleanScreen.toggle() } else if cleanScreen { cleanScreen = false } else { session.toggle() }
+    }
+
+    private var autoHideKey: String { "\(landscape)-\(cleanScreen)-\(session.isPlaying)-\(session.scrubbing)-\(episodesVisible || speedsVisible)" }
+
+    /// 全屏观看 holds landscape; leaving it holds portrait until the player closes, even with the phone held sideways.
+    private func enterFullScreen() { InterfaceOrientationLock.lock(.landscape, rotate: true) }
+    private func exitFullScreen() { InterfaceOrientationLock.lock(.portrait, rotate: true) }
 
     /// Controls fade out with the screen and stop taking touches and VoiceOver focus.
     private func chrome(@ViewBuilder content: () -> some View) -> some View {
@@ -112,12 +162,13 @@ struct PlayerScreen: View {
     private var currentPage: some View {
         ZStack {
             Color.black
-            if let player = session.player {
-                PlayerLayerView(player: player) { [ticket = session.playID] in session.firstFrame(ticket: ticket) }.id(session.playID)
-            }
+            PlayerSurfaceView(surface: surface)
             // Fade the picture in once its first frame is on screen instead of popping from black; cover instantly on switch.
             Color.black.opacity(session.rendered ? 0 : 1).animation(session.rendered ? Animation.easeOut(duration: 0.24) : nil, value: session.rendered)
             if !session.rendered && (dragging || sliding) { EpisodePlaceholder(number: session.episode.index, title: session.detail.drama.title) }
+            if surface.pipActive {
+                VStack(spacing: 10) { Image(systemName: "pip").font(.system(size: 34)); Text("正在小窗播放").font(.subheadline) }.foregroundStyle(.white.opacity(0.6))
+            }
         }
     }
 
@@ -126,7 +177,7 @@ struct PlayerScreen: View {
     }
 
     private func dragChanged(_ translation: CGFloat) {
-        guard !sliding else { return }
+        guard !sliding, !landscape else { return }
         if !dragging { dragging = true; session.holdForGesture() }
         let atFirst = session.index == 0 && translation > 0
         let atLast = session.index + 1 >= session.detail.episodes.count && translation < 0
@@ -155,6 +206,8 @@ struct PlayerScreen: View {
     /// Autoplay, buttons and the episode sheet slide the same way a swipe does. Touches are off until the slide ends.
     private func slide(to target: Int) {
         guard !sliding, !dragging, target != session.index, session.detail.episodes.indices.contains(target) else { return }
+        // Full screen has no pages to slide, and the small window may be running with the app in the background.
+        if landscape || surface.pipActive { session.load(index: target, startAt: 0); return }
         session.holdForGesture()
         commitSlide(to: target)
     }
@@ -174,8 +227,11 @@ struct PlayerScreen: View {
 
     private var topBar: some View {
         HStack(alignment: .center, spacing: 13) {
-            Button { session.stop(); dismiss() } label: { Image(systemName: "chevron.left").font(.title3.weight(.semibold)).frame(width: 40, height: 44).background(.black.opacity(0.18), in: Circle()) }.accessibilityLabel("关闭播放器")
+            Button { if landscape { exitFullScreen() } else { session.stop(); dismiss() } } label: { Image(systemName: "chevron.left").font(.title3.weight(.semibold)).frame(width: 40, height: 44).background(.black.opacity(0.18), in: Circle()) }.accessibilityLabel(landscape ? "退出全屏" : "关闭播放器")
             VStack(alignment: .leading, spacing: 4) { Text(session.detail.drama.title).font(.subheadline.weight(.semibold)).lineLimit(1); Text("第 \(visibleEpisode.index) 集 / 共 \(session.detail.episodes.count) 集").font(.caption).foregroundStyle(.white.opacity(0.7)) }.frame(maxWidth: .infinity, alignment: .leading)
+            if surface.pipPossible {
+                Button { if surface.pipActive { surface.stopPictureInPicture() } else { surface.startPictureInPicture() } } label: { Image(systemName: surface.pipActive ? "pip.exit" : "pip.enter").font(.title3).frame(width: 40, height: 44) }.accessibilityLabel(surface.pipActive ? "退出小窗" : "小窗播放").accessibilityIdentifier("player.pip")
+            }
             Button { library.toggleFavorite(session.detail.drama) } label: { Image(systemName: library.isFavorite(session.detail.drama) ? "star.fill" : "star").font(.title3).foregroundStyle(library.isFavorite(session.detail.drama) ? .yellow : .white).frame(width: 44, height: 44) }.accessibilityLabel(library.isFavorite(session.detail.drama) ? "取消本机收藏" : "添加本机收藏")
         }.buttonStyle(.plain)
     }
@@ -203,6 +259,9 @@ struct PlayerScreen: View {
                 Spacer(minLength: 0)
                 Button { speedsVisible = true } label: { Text(String(format: "%g×", session.app.speed)).font(.subheadline.weight(.semibold)).frame(minWidth: 52, minHeight: 44).contentShape(Rectangle()) }.accessibilityLabel("播放倍速").accessibilityValue(String(format: "%g×", session.app.speed)).accessibilityIdentifier("player.speed")
                 Button { episodesVisible = true } label: { Label("选集", systemImage: "square.grid.2x2").font(.subheadline.weight(.semibold)).frame(minHeight: 44).contentShape(Rectangle()) }.accessibilityIdentifier("player.episodes")
+                if landscape {
+                    Button(action: exitFullScreen) { Image(systemName: "arrow.down.right.and.arrow.up.left").frame(width: 40, height: 44).contentShape(Rectangle()) }.accessibilityLabel("退出全屏").accessibilityIdentifier("player.exitFullScreen")
+                }
             }.buttonStyle(.plain)
         }
     }
@@ -216,27 +275,6 @@ struct PlayerScreen: View {
     private var speedSheet: some View {
         NavigationStack { List { ForEach([Float(0.5), 0.75, 1, 1.25, 1.5, 2], id: \.self) { speed in Button { session.setSpeed(speed); speedsVisible = false } label: { HStack { Text(String(format: "%g×", speed)); Spacer(); if session.app.speed == speed { Image(systemName: "checkmark").foregroundStyle(Color(hex: 0xF08058)) } }.foregroundStyle(.white).frame(minHeight: 33) } } }.navigationTitle("播放倍速").navigationBarTitleDisplayMode(.inline).toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { speedsVisible = false } } } }.presentationDetents([.height(405)]).presentationDragIndicator(.visible).preferredColorScheme(.dark)
     }
-}
-
-private final class PlayerLayerHost: UIView {
-    override class var layerClass: AnyClass { AVPlayerLayer.self }
-    var playerLayer: AVPlayerLayer { layer as! AVPlayerLayer }
-}
-
-struct PlayerLayerView: UIViewRepresentable {
-    let player: AVPlayer
-    let onFirstFrame: () -> Void
-    func makeCoordinator() -> Coordinator { Coordinator(onFirstFrame) }
-    func makeUIView(context: Context) -> UIView {
-        let view = PlayerLayerHost()
-        view.playerLayer.videoGravity = .resizeAspect
-        view.playerLayer.player = player
-        context.coordinator.observation = view.playerLayer.observe(\.isReadyForDisplay, options: [.initial, .new]) { [weak coordinator = context.coordinator] layer, _ in if layer.isReadyForDisplay { DispatchQueue.main.async { coordinator?.ready() } } }
-        return view
-    }
-    func updateUIView(_ uiView: UIView, context: Context) { (uiView as? PlayerLayerHost)?.playerLayer.player = player }
-    static func dismantleUIView(_ uiView: UIView, coordinator: Coordinator) { coordinator.observation = nil; (uiView as? PlayerLayerHost)?.playerLayer.player = nil }
-    final class Coordinator { var observation: NSKeyValueObservation?; private var sent = false; let callback: () -> Void; init(_ callback: @escaping () -> Void) { self.callback = callback }; func ready() { guard !sent else { return }; sent = true; callback() } }
 }
 
 private struct EpisodePlaceholder: View {

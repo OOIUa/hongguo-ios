@@ -2,6 +2,8 @@ import SwiftUI
 
 @main
 struct HongguoApp: App {
+    /// Supplies the orientation lock used by 全屏观看.
+    @UIApplicationDelegateAdaptor(HongguoAppDelegate.self) private var appDelegate
     @StateObject private var model = AppModel()
     @StateObject private var library = LibraryStore.shared
     /// The default cache is small; covers are preloaded into it, and are about 50 KB each.

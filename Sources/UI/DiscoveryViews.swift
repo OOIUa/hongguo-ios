@@ -108,7 +108,7 @@ struct HomeView: View {
         // Signed in: the account's own feed; otherwise the anonymous one. A changed owner restarts the round.
         let owner = account.guessOwner
         let restart = reset || guessPager == nil || guessPager?.owner != owner
-        if restart { guessPager = GuessPager(owner: owner) { cursor, offset in try await AccountService.shared.guessBatch(owner: owner, cursor: cursor, offset: offset) } }
+        if restart { guessPager = GuessPager(owner: owner, previous: guessPager) { cursor in try await AccountService.shared.guessBatch(owner: owner, cursor: cursor) } }
         guard let pager = guessPager else { return }
         loader.load(reset: restart) { _ in try await pager.next() }
     }

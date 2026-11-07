@@ -302,20 +302,23 @@ final class AccountService: ObservableObject {
 
     /// One 猜你喜欢 batch. A non-nil owner carries that account's login cookie only while the same login session
     /// is still active, so an old round's pagination never mixes into a new account.
-    func guessBatch(owner: UUID?, cursor: String, offset: Int) async throws -> GuessBatch {
+    func guessBatch(owner: UUID?, cursor: GuessCursor) async throws -> GuessBatch {
         var account: GuessAccount?
         if let owner {
             guard owner == generation, authenticated, let candidate = credentials else { throw HGError.message("账号已变化，请刷新猜你喜欢") }
             account = GuessAccount(cookie: candidate.cookie, device: candidate.device)
         }
-        return try await GuessFeed.batch(account: account, session: cursor, offset: offset) { request in
+        let session = self.session
+        return try await GuessFeed.batch(account: account, cursor: cursor,
+                                         identity: { try await GuessIdentity.shared.identity(session: session) },
+                                         forget: { await GuessIdentity.shared.forget($0) }) { request in
             let (bytes, response) = try await session.data(for: request)
             try Task.checkCancellation()
             if let owner, owner != generation { throw CancellationError() }
             guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
                 throw HGError.message("猜你喜欢暂时不可用（HTTP \((response as? HTTPURLResponse)?.statusCode ?? 0)）")
             }
-            guard !bytes.isEmpty else { throw HGError.message("猜你喜欢返回空响应，请稍后重试") }
+            guard !bytes.isEmpty else { throw GuessEmptyResponse() }
             return try ProtocolJSON.object(bytes)
         }
     }
