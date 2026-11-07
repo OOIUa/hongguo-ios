@@ -3,24 +3,24 @@
   "message": "项目维护者发布的未签名 IPA；需要自行签名安装。",
   "identifier": "ooiua.hongguo-ios.source",
   "sourceURL": "https://raw.githubusercontent.com/OOIUa/hongguo-ios/main/distribution/source.json",
-  "sourceicon": "https://raw.githubusercontent.com/OOIUa/hongguo-ios/v0.1.13/distribution/icon.png",
+  "sourceicon": "https://raw.githubusercontent.com/OOIUa/hongguo-ios/v0.1.14/distribution/icon.png",
   "apps": [
     {
       "name": "红果独立版",
       "type": "1",
       "bundleIdentifier": "com.ooiua.hongguo.ios",
-      "version": "0.1.13",
-      "build": 14,
+      "version": "0.1.14",
+      "build": 15,
       "minimumOSVersion": "17.0",
-      "versionDate": "2026-11-06T19:25:48Z",
-      "versionDescription": "修复无法播放：取播放信息改为带完整签名的请求，并在 20 秒内依次尝试备用线路。\n放行部分片源跳转用到的 CDN 域名，减少片源加载失败。\n未签名 IPA，需使用本人的证书签名后安装。",
+      "versionDate": "2026-11-07T09:29:20Z",
+      "versionDescription": "横屏片源下方新增「全屏观看」，横屏时轻点显示或隐藏控件。\n新增小窗播放：播放页顶栏的小窗按钮，或播放时离开应用自动转为小窗（可在系统设置的“画中画”中关闭自动开启）。\n推荐流按新协议请求，刷新不再重播旧推荐。\n整集只有 ByteVC2 编码时，会用兼容参数再请求一次可播放的片源。\n未签名 IPA，需使用本人的证书签名后安装。",
       "lock": "0",
-      "downloadURL": "https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.13/Hongguo-iOS-0.1.13-unsigned.ipa",
+      "downloadURL": "https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.14/Hongguo-iOS-0.1.14-unsigned.ipa",
       "isLanZouCloud": "0",
-      "iconURL": "https://raw.githubusercontent.com/OOIUa/hongguo-ios/v0.1.13/distribution/icon.png",
+      "iconURL": "https://raw.githubusercontent.com/OOIUa/hongguo-ios/v0.1.14/distribution/icon.png",
       "tintColor": "E8463F",
-      "size": "1669959",
-      "sha256": "66930465a9a7fe15249fd9b5ba44f6c70e1d089e97065d9d5b5dd48455e85cf6"
+      "size": "1731463",
+      "sha256": "5e2b99be4e2d1effdc6ec9dc5674df98ecdc03d2be5edae24c08c8a97235c13f"
     }
   ]
 }
