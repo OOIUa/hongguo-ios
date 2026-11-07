@@ -1,19 +1,17 @@
 {
-  "version": "0.1.14",
-  "build": 15,
+  "version": "0.1.15",
+  "build": 16,
   "minimumOSVersion": "17.0",
   "releaseNotes": [
-    "横屏片源下方新增「全屏观看」，横屏时轻点显示或隐藏控件。",
-    "新增小窗播放：播放页顶栏的小窗按钮，或播放时离开应用自动转为小窗（可在系统设置的“画中画”中关闭自动开启）。",
-    "推荐流按新协议请求，刷新不再重播旧推荐。",
-    "整集只有 ByteVC2 编码时，会用兼容参数再请求一次可播放的片源。"
+    "播放页手势参考 B 站：轻点显示或隐藏控件，双击中间暂停或继续，双击左右两侧快退或快进 10 秒，连续点击可累加。",
+    "点击播放页顶部的短剧名称打开剧集详情，关闭后继续播放。"
   ],
-  "publishedAt": "2026-11-07T09:29:20Z",
-  "downloadURL": "https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.14/Hongguo-iOS-0.1.14-unsigned.ipa",
-  "sha256": "5e2b99be4e2d1effdc6ec9dc5674df98ecdc03d2be5edae24c08c8a97235c13f",
-  "size": 1731463,
+  "publishedAt": "2026-11-07T15:45:01Z",
+  "downloadURL": "https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.15/Hongguo-iOS-0.1.15-unsigned.ipa",
+  "sha256": "328c0479716bf42c084b7691e469d39f9b4ab2e2540977772691b93cb75ef2e5",
+  "size": 1753273,
   "mirrors": {
-    "gh-proxy": "https://gh-proxy.com/https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.14/Hongguo-iOS-0.1.14-unsigned.ipa",
-    "ghfast": "https://ghfast.top/https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.14/Hongguo-iOS-0.1.14-unsigned.ipa"
+    "gh-proxy": "https://gh-proxy.com/https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.15/Hongguo-iOS-0.1.15-unsigned.ipa",
+    "ghfast": "https://ghfast.top/https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.15/Hongguo-iOS-0.1.15-unsigned.ipa"
   }
 }
