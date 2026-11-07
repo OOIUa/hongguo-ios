@@ -157,6 +157,17 @@ final class PlayerSession: ObservableObject {
 
     func toggle() { if finished { load(index: index, startAt: 0) } else if isPlaying || (player?.rate ?? 0) > 0 { pause() } else { endHold(); endMessage = nil; currentStream?.resume(); player?.playImmediately(atRate: app.speed) } }
     func pause() { endHold(); player?.pause(); currentStream?.pause(); isPlaying = false; saveProgress(flush: true) }
+    /// Double-tapping a side of the picture jumps back or ahead, stopping short of the end so it never ends the episode.
+    @discardableResult
+    func skip(by seconds: Double) -> Bool {
+        guard let player, rendered, !scrubbing, duration > 0 else { return false }
+        let target = min(max(0, position + seconds), max(0, duration - 1))
+        guard abs(target - position) > 0.2 else { return false }
+        finished = false; endMessage = nil
+        player.seek(to: CMTime(seconds: target, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
+        position = target; saveProgress()
+        return true
+    }
     func setSpeed(_ speed: Float) { app.speed = speed; holding = false; if isPlaying { player?.rate = speed } }
     func beginHold() { guard isPlaying, rendered, !scrubbing, !holding else { return }; holding = true; player?.rate = 2; Haptics.holdSpeedBegan() }
     func endHold() { guard holding else { return }; holding = false; if (player?.rate ?? 0) > 0 { player?.rate = app.speed } }

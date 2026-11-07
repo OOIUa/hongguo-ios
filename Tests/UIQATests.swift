@@ -108,6 +108,42 @@ final class HongguoQATests: XCTestCase {
         capture("15-library-after-relaunch")
     }
 
+    /// Needs 有间客栈 in the local watch history and a live network.
+    func testPlayerTapGestures() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication(bundleIdentifier: "com.ooiua.hongguo.ios")
+        app.launch()
+        app.tabBars.buttons["追剧"].tap()
+        app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "有间客栈")).firstMatch.tap()
+        XCTAssertTrue(app.buttons["暂停"].waitForExistence(timeout: 90))
+        let video = app.buttons["视频画面"]
+        func point(_ x: CGFloat) -> XCUICoordinate { video.coordinate(withNormalizedOffset: CGVector(dx: x, dy: 0.5)) }
+        let progress = app.sliders["播放进度"]
+        func percent() -> Double { Double((progress.value as? String ?? "0").filter { $0.isNumber || $0 == "." }) ?? 0 }
+        point(0.5).doubleTap()
+        XCTAssertTrue(app.buttons["继续播放"].waitForExistence(timeout: 3), "double tap in the middle pauses")
+        let start = percent()
+        point(0.88).doubleTap(); sleep(1)
+        let ahead = percent()
+        capture("20-skip-forward")
+        XCTAssertGreaterThan(ahead, start + 5, "double tap on the right jumps ahead (\(start) -> \(ahead))")
+        point(0.12).doubleTap(); sleep(1)
+        XCTAssertLessThan(abs(percent() - start), 3, "double tap on the left jumps back")
+        // Hidden controls stay in the tree at zero opacity; with them gone the picture's touch area fills the screen.
+        point(0.85).tap(); sleep(1)
+        capture("22-tap-hides")
+        XCTAssertEqual(video.frame.minY, 0, "a tap hides the controls")
+        point(0.15).tap(); sleep(1)
+        XCTAssertGreaterThan(video.frame.minY, 0, "a second tap shows them")
+        point(0.5).doubleTap()
+        XCTAssertTrue(app.buttons["暂停"].waitForExistence(timeout: 5), "double tap in the middle resumes")
+        app.buttons["player.dramaTitle"].tap()
+        XCTAssertTrue(app.navigationBars["剧集详情"].waitForExistence(timeout: 5))
+        capture("21-detail-over-player")
+        app.buttons["完成"].tap()
+        XCTAssertTrue(app.buttons["暂停"].waitForExistence(timeout: 5), "closing the detail page resumes playback")
+    }
+
     private func capture(_ name: String) {
         let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         attachment.name = name; attachment.lifetime = .keepAlways; add(attachment)

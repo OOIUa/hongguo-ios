@@ -10,6 +10,11 @@ struct PlayerScreen: View {
     @StateObject private var surface = PlayerSurface()
     @State private var episodesVisible = false
     @State private var speedsVisible = false
+    /// 短剧详情 over the player; the episode waits paused underneath and goes on when the sheet closes.
+    @State private var detailVisible = false
+    @State private var resumeAfterDetail = false
+    /// The side badge after a double-tap skip; quick repeats on the same side add up.
+    @State private var skipFeedback: SkipFeedback?
     // Page drag: the current picture follows the finger and the neighbouring episode number slides in.
     @State private var pageHeight: CGFloat = 1
     @State private var dragOffset: CGFloat = 0
@@ -18,8 +23,8 @@ struct PlayerScreen: View {
     @State private var slideTarget: Int?
     /// 清屏: only the picture remains until a tap or an inward pinch brings the controls back.
     @State private var cleanScreen = false
-    /// Landscape is full-screen viewing, whether 全屏观看 turned the screen or the user did: a tap shows or hides the
-    /// controls, and episodes change from the controls, the episode sheet or autoplay rather than by swiping.
+    /// Landscape is full-screen viewing, whether 全屏观看 turned the screen or the user did: episodes change from the
+    /// controls, the episode sheet or autoplay rather than by swiping.
     @State private var landscape = false
     /// Holding for 2× hides the same elements, for as long as the hold lasts.
     private var chromeHidden: Bool { cleanScreen || session.holding }
@@ -29,25 +34,34 @@ struct PlayerScreen: View {
             && session.videoSize.width > session.videoSize.height
     }
 
-    init(request: PlaybackRequest, model: AppModel) { _session = StateObject(wrappedValue: PlayerSession(request: request, app: model)) }
+    private let requestID: UUID
+
+    init(request: PlaybackRequest, model: AppModel) { requestID = request.id; _session = StateObject(wrappedValue: PlayerSession(request: request, app: model)) }
 
     var body: some View {
         GeometryReader { geometry in
             ZStack {
                 VStack(spacing: 0) {
-                    // The insets keep touches near the controls from pausing; with the controls gone the whole screen responds.
+                    // The insets keep touches near the controls from reaching the picture; with the controls gone the whole screen responds.
                     Color.clear.frame(height: cleanScreen ? 0 : (geometry.size.height < 420 ? 58 : 70)).allowsHitTesting(false)
-                    VideoGestureView(enabled: !sliding && !episodesVisible && !speedsVisible && !session.scrubbing,
-                                     tap: videoTapped, holdBegan: session.beginHold, holdEnded: session.endHold,
+                    VideoGestureView(enabled: !sliding && !episodesVisible && !speedsVisible && !detailVisible && !session.scrubbing,
+                                     tap: videoTapped, doubleTap: videoDoubleTapped, holdBegan: session.beginHold, holdEnded: session.endHold,
                                      dragChanged: dragChanged, dragEnded: dragEnded, dragCancelled: dragCancelled,
                                      pinched: { if !landscape { cleanScreen = $0 } })
-                        .accessibilityElement().accessibilityLabel("视频画面").accessibilityHint(landscape ? (cleanScreen ? "轻点显示控制栏" : "轻点隐藏控制栏") : cleanScreen ? "轻点退出清屏" : "轻点暂停或继续，上下拖动切换剧集").accessibilityAddTraits(.isButton)
-                        .accessibilityAction { videoTapped() }
+                        .accessibilityElement().accessibilityLabel("视频画面").accessibilityHint((session.isPlaying ? "轻点暂停" : "轻点继续播放") + (landscape ? "" : "，上下拖动切换剧集")).accessibilityAddTraits(.isButton)
+                        .accessibilityAction { session.toggle() }
                         .accessibilityAction(named: cleanScreen ? "退出清屏" : "清屏播放") { cleanScreen.toggle() }
+                        .accessibilityAction(named: "快退 10 秒") { skip(forward: false) }
+                        .accessibilityAction(named: "快进 10 秒") { skip(forward: true) }
                         .accessibilityAction(named: "下一集") { session.next() }
                         .accessibilityAction(named: "上一集") { session.previous() }
                     Color.clear.frame(height: cleanScreen ? 0 : (geometry.size.height < 420 ? 112 : 174)).allowsHitTesting(false)
                 }.ignoresSafeArea(edges: cleanScreen ? .all : []).zIndex(1)
+                if let feedback = skipFeedback {
+                    SkipBadge(feedback: feedback)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: feedback.forward ? .trailing : .leading)
+                        .padding(.horizontal, landscape ? 70 : 26).allowsHitTesting(false).transition(.opacity).zIndex(1.6)
+                }
                 if fullScreenOffered {
                     GeometryReader { full in
                         let pictureHeight = min(full.size.height, full.size.width * session.videoSize.height / session.videoSize.width)
@@ -90,6 +104,7 @@ struct PlayerScreen: View {
         .preferredColorScheme(.dark).statusBarHidden(chromeHidden).persistentSystemOverlays(chromeHidden ? .hidden : .automatic)
             .sheet(isPresented: $episodesVisible) { episodeSheet }
             .sheet(isPresented: $speedsVisible) { speedSheet }
+            .sheet(isPresented: $detailVisible, onDismiss: detailClosed) { detailSheet }
             .task {
                 surface.bind(session)
                 surface.closedInBackground = { session.suspend() }
@@ -108,7 +123,7 @@ struct PlayerScreen: View {
             .onChange(of: landscape) { _, _ in cleanScreen = false }
             // In full screen the controls step aside after a few seconds of playback.
             .task(id: autoHideKey) {
-                guard landscape, !cleanScreen, session.isPlaying, !session.scrubbing, !episodesVisible, !speedsVisible else { return }
+                guard landscape, !cleanScreen, session.isPlaying, !session.scrubbing, !episodesVisible, !speedsVisible, !detailVisible else { return }
                 try? await Task.sleep(for: .seconds(4))
                 if !Task.isCancelled { cleanScreen = true }
             }
@@ -123,11 +138,41 @@ struct PlayerScreen: View {
             }
     }
 
-    private func videoTapped() {
-        if landscape { cleanScreen.toggle() } else if cleanScreen { cleanScreen = false } else { session.toggle() }
+    /// As in Bilibili-style players: a tap shows or hides the controls; a double tap on the left or right third jumps
+    /// 10 seconds back or ahead, and in the middle pauses or resumes. A pause brings the controls back by itself.
+    private func videoTapped(at fraction: CGFloat) {
+        // Taps that follow a skip on the same side keep skipping, so tap-tap-tap goes 20 seconds.
+        if let feedback = skipFeedback, feedback.forward ? fraction > 0.7 : fraction < 0.3 { skip(forward: feedback.forward); return }
+        cleanScreen.toggle()
     }
 
-    private var autoHideKey: String { "\(landscape)-\(cleanScreen)-\(session.isPlaying)-\(session.scrubbing)-\(episodesVisible || speedsVisible)" }
+    private func videoDoubleTapped(at fraction: CGFloat) {
+        if fraction < 0.3 { skip(forward: false) } else if fraction > 0.7 { skip(forward: true) } else if session.player != nil { session.toggle() }
+    }
+
+    private func skip(forward: Bool) {
+        guard session.skip(by: forward ? 10 : -10) else { return }
+        let feedback = SkipFeedback(forward: forward, seconds: (skipFeedback?.forward == forward ? skipFeedback?.seconds ?? 0 : 0) + 10)
+        withAnimation(.easeOut(duration: 0.12)) { skipFeedback = feedback }
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(900))
+            if skipFeedback == feedback { withAnimation(.easeOut(duration: 0.25)) { skipFeedback = nil } }
+        }
+    }
+
+    private func openDetail() {
+        resumeAfterDetail = session.isPlaying
+        if session.isPlaying { session.pause() }
+        detailVisible = true
+    }
+
+    private func detailClosed() {
+        // Playing an episode from the detail page replaces this player, so nothing resumes behind the new one.
+        if resumeAfterDetail, !session.isPlaying, session.app.playback?.id == requestID { session.toggle() }
+        resumeAfterDetail = false
+    }
+
+    private var autoHideKey: String { "\(landscape)-\(cleanScreen)-\(session.isPlaying)-\(session.scrubbing)-\(episodesVisible || speedsVisible || detailVisible)" }
 
     /// 全屏观看 holds landscape; leaving it holds portrait until the player closes, even with the phone held sideways.
     private func enterFullScreen() { InterfaceOrientationLock.lock(.landscape, rotate: true) }
@@ -228,7 +273,12 @@ struct PlayerScreen: View {
     private var topBar: some View {
         HStack(alignment: .center, spacing: 13) {
             Button { if landscape { exitFullScreen() } else { session.stop(); dismiss() } } label: { Image(systemName: "chevron.left").font(.title3.weight(.semibold)).frame(width: 40, height: 44).background(.black.opacity(0.18), in: Circle()) }.accessibilityLabel(landscape ? "退出全屏" : "关闭播放器")
-            VStack(alignment: .leading, spacing: 4) { Text(session.detail.drama.title).font(.subheadline.weight(.semibold)).lineLimit(1); Text("第 \(visibleEpisode.index) 集 / 共 \(session.detail.episodes.count) 集").font(.caption).foregroundStyle(.white.opacity(0.7)) }.frame(maxWidth: .infinity, alignment: .leading)
+            Button(action: openDetail) {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 3) { Text(session.detail.drama.title).font(.subheadline.weight(.semibold)).lineLimit(1); Image(systemName: "chevron.right").font(.caption2.weight(.bold)).foregroundStyle(.white.opacity(0.6)) }
+                    Text("第 \(visibleEpisode.index) 集 / 共 \(session.detail.episodes.count) 集").font(.caption).foregroundStyle(.white.opacity(0.7))
+                }.frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).contentShape(Rectangle())
+            }.accessibilityLabel("\(session.detail.drama.title)，第 \(visibleEpisode.index) 集").accessibilityHint("打开短剧详情").accessibilityIdentifier("player.dramaTitle")
             if surface.pipPossible {
                 Button { if surface.pipActive { surface.stopPictureInPicture() } else { surface.startPictureInPicture() } } label: { Image(systemName: surface.pipActive ? "pip.exit" : "pip.enter").font(.title3).frame(width: 40, height: 44) }.accessibilityLabel(surface.pipActive ? "退出小窗" : "小窗播放").accessibilityIdentifier("player.pip")
             }
@@ -246,7 +296,7 @@ struct PlayerScreen: View {
 
     private func bottomBar(compact: Bool) -> some View {
         VStack(alignment: .leading, spacing: compact ? 6 : 13) {
-            if !compact { HStack { Text("第 \(visibleEpisode.index) 集").font(.title3.bold()); Spacer(); Text("上滑下一集 · 左侧长按 2× · 双指外拉清屏").font(.caption2).foregroundStyle(.white.opacity(0.55)).lineLimit(1).minimumScaleFactor(0.8) } }
+            if !compact { HStack { Text("第 \(visibleEpisode.index) 集").font(.title3.bold()); Spacer(); Text("双击暂停 · 双击两侧快退/快进 · 左侧长按 2×").font(.caption2).foregroundStyle(.white.opacity(0.55)).lineLimit(1).minimumScaleFactor(0.8) } }
             HStack(spacing: 10) {
                 Text(timeLabel(session.scrubbing ? session.previewPosition : session.position)).font(.caption.monospacedDigit()).frame(minWidth: 36)
                 Slider(value: Binding(get: { session.scrubbing ? session.previewPosition : session.position }, set: { session.previewPosition = $0 }), in: 0...max(session.duration, 1), onEditingChanged: session.setSeeking).tint(Color(hex: 0xF08058)).disabled(session.duration <= 0).accessibilityLabel("播放进度")
@@ -272,8 +322,33 @@ struct PlayerScreen: View {
         }.presentationDetents([.medium, .large]).presentationDragIndicator(.visible).preferredColorScheme(.dark)
     }
 
+    /// The same page the library and home open, themed like them rather than like the dark player.
+    private var detailSheet: some View {
+        NavigationStack {
+            DetailView(drama: session.detail.drama)
+                .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { detailVisible = false } } }
+        }.environment(\.colorScheme, session.app.isDark ? .dark : .light).preferredColorScheme(session.app.isDark ? .dark : .light)
+        .presentationDragIndicator(.visible)
+    }
+
     private var speedSheet: some View {
         NavigationStack { List { ForEach([Float(0.5), 0.75, 1, 1.25, 1.5, 2], id: \.self) { speed in Button { session.setSpeed(speed); speedsVisible = false } label: { HStack { Text(String(format: "%g×", speed)); Spacer(); if session.app.speed == speed { Image(systemName: "checkmark").foregroundStyle(Color(hex: 0xF08058)) } }.foregroundStyle(.white).frame(minHeight: 33) } } }.navigationTitle("播放倍速").navigationBarTitleDisplayMode(.inline).toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { speedsVisible = false } } } }.presentationDetents([.height(405)]).presentationDragIndicator(.visible).preferredColorScheme(.dark)
+    }
+}
+
+private struct SkipFeedback: Equatable {
+    let forward: Bool
+    let seconds: Int
+    let id = UUID()
+}
+
+private struct SkipBadge: View {
+    let feedback: SkipFeedback
+    var body: some View {
+        VStack(spacing: 4) {
+            Image(systemName: feedback.forward ? "forward.fill" : "backward.fill").font(.system(size: 22))
+            Text("\(feedback.forward ? "+" : "-")\(feedback.seconds) 秒").font(.caption.weight(.semibold).monospacedDigit())
+        }.frame(width: 86, height: 86).background(.black.opacity(0.4), in: Circle()).accessibilityHidden(true)
     }
 }
 
@@ -290,7 +365,9 @@ private struct EpisodePlaceholder: View {
 
 private struct VideoGestureView: UIViewRepresentable {
     let enabled: Bool
-    let tap: () -> Void
+    /// Where the tap landed across the picture, 0 at the left edge and 1 at the right.
+    let tap: (CGFloat) -> Void
+    let doubleTap: (CGFloat) -> Void
     let holdBegan: () -> Void
     let holdEnded: () -> Void
     let dragChanged: (CGFloat) -> Void
@@ -302,12 +379,14 @@ private struct VideoGestureView: UIViewRepresentable {
     func makeUIView(context: Context) -> UIView {
         let view = UIView(); view.backgroundColor = .clear
         let hold = UILongPressGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.hold(_:))); hold.minimumPressDuration = 0.35; hold.allowableMovement = 18
-        let tap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.tapped)); tap.require(toFail: hold)
+        // A single tap waits for the double tap to fail (about a quarter second), as in other players with double-tap skips.
+        let doubleTap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.doubleTapped(_:))); doubleTap.numberOfTapsRequired = 2; doubleTap.require(toFail: hold)
+        let tap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.tapped(_:))); tap.require(toFail: hold); tap.require(toFail: doubleTap)
         // A vertical pan replaces the old one-shot swipes so the page follows the finger. While a hold is active the
         // pan cannot start, and a pan that starts first makes the hold fail, so 2x and paging never mix.
         let pan = UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.panned(_:))); pan.maximumNumberOfTouches = 1; pan.delegate = context.coordinator
         let pinch = UIPinchGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.pinchChanged(_:)))
-        let recognizers: [UIGestureRecognizer] = [hold, tap, pan, pinch]
+        let recognizers: [UIGestureRecognizer] = [hold, doubleTap, tap, pan, pinch]
         recognizers.forEach { $0.isEnabled = enabled; view.addGestureRecognizer($0) }
         return view
     }
@@ -326,7 +405,12 @@ private struct VideoGestureView: UIViewRepresentable {
             pinchDecided = true
             parent.pinched(gesture.scale > 1)
         }
-        @objc func tapped() { parent.tap() }
+        @objc func tapped(_ gesture: UITapGestureRecognizer) { if let x = fraction(gesture) { parent.tap(x) } }
+        @objc func doubleTapped(_ gesture: UITapGestureRecognizer) { if let x = fraction(gesture) { parent.doubleTap(x) } }
+        private func fraction(_ gesture: UIGestureRecognizer) -> CGFloat? {
+            guard let view = gesture.view, view.bounds.width > 0 else { return nil }
+            return gesture.location(in: view).x / view.bounds.width
+        }
         @objc func hold(_ gesture: UILongPressGestureRecognizer) { if gesture.state == .began, let view = gesture.view, gesture.location(in: view).x < view.bounds.width / 2 { parent.holdBegan() }; if [.ended, .cancelled, .failed].contains(gesture.state) { parent.holdEnded() } }
         @objc func panned(_ gesture: UIPanGestureRecognizer) {
             guard let view = gesture.view else { return }
