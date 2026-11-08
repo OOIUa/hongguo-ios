@@ -3,24 +3,24 @@
   "message": "项目维护者发布的未签名 IPA；需要自行签名安装。加速服务由第三方提供。",
   "identifier": "ooiua.hongguo-ios.source-cn",
   "sourceURL": "https://gh-proxy.com/https://raw.githubusercontent.com/OOIUa/hongguo-ios/main/distribution/source-cn.json",
-  "sourceicon": "https://gh-proxy.com/https://raw.githubusercontent.com/OOIUa/hongguo-ios/v0.1.17/distribution/icon.png",
+  "sourceicon": "https://gh-proxy.com/https://raw.githubusercontent.com/OOIUa/hongguo-ios/v0.1.18/distribution/icon.png",
   "apps": [
     {
       "name": "红果独立版",
       "type": "1",
       "bundleIdentifier": "com.ooiua.hongguo.ios",
-      "version": "0.1.17",
-      "build": 18,
+      "version": "0.1.18",
+      "build": 19,
       "minimumOSVersion": "17.0",
-      "versionDate": "2026-11-08T11:36:39Z",
-      "versionDescription": "修复偶发的“视频下载失败”“视频播放失败”：片源服务器把部分请求转到其他 CDN 节点时不再拒绝，分段下载失败会自动重试。\n未签名 IPA，需使用本人的证书签名后安装。",
+      "versionDate": "2026-11-08T11:54:21Z",
+      "versionDescription": "播放页可在画面上左右滑动调整进度：中间显示目标时间，进度条同步移动，松手跳转；上下滑动仍切集。\n0.1.17 起修复偶发的视频下载 / 播放失败。\n未签名 IPA，需使用本人的证书签名后安装。",
       "lock": "0",
-      "downloadURL": "https://gh-proxy.com/https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.17/Hongguo-iOS-0.1.17-unsigned.ipa",
+      "downloadURL": "https://gh-proxy.com/https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.18/Hongguo-iOS-0.1.18-unsigned.ipa",
       "isLanZouCloud": "0",
-      "iconURL": "https://gh-proxy.com/https://raw.githubusercontent.com/OOIUa/hongguo-ios/v0.1.17/distribution/icon.png",
+      "iconURL": "https://gh-proxy.com/https://raw.githubusercontent.com/OOIUa/hongguo-ios/v0.1.18/distribution/icon.png",
       "tintColor": "E8463F",
-      "size": "1750641",
-      "sha256": "7786953766443734f0e0da3eb16d49b17e6b07dfc07230cf4442111f2419f5ee"
+      "size": "1757871",
+      "sha256": "4d828bbe6fccd019293c2162576b7be50357ec6269a126f98d997026154363ca"
     }
   ]
 }
