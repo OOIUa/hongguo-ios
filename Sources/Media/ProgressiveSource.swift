@@ -30,7 +30,7 @@ actor ProgressiveSource {
     static func open(track: VideoTrack, episodeID: String, cache: ProgressiveCache = .shared,
                      fetch: Fetch? = nil, progress: @Sendable @escaping (String, Double) -> Void = { _, _ in }) async throws -> ProgressiveSource {
         guard !episodeID.isEmpty, episodeID.count <= 64, MediaRangeHTTP.allowed(track.url) else { throw MediaError.unavailable }
-        let provider: Fetch = fetch ?? { range in try await MediaRangeHTTP.fetch(track.url, range: range) }
+        let provider: Fetch = fetch ?? { range in try await MediaRangeHTTP.fetchRetrying(track.url, range: range) }
         let source = ProgressiveSource(cache: cache, fetch: provider, progress: progress)
         return try await withTaskCancellationHandler(operation: {
             do {

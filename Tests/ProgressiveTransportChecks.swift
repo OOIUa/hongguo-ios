@@ -4,11 +4,13 @@ import Foundation
 private final class RangeProbeProtocol: URLProtocol {
     static var mode = "valid"
     static var lastRequest: URLRequest?
+    static var failures = 0
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
         Self.lastRequest = request
-        let mode = Self.mode
+        var mode = Self.mode
+        if mode == "fail-twice" { if Self.failures < 2 { Self.failures += 1; mode = "ignore-range" } else { mode = "valid" } }
         var headers = ["Content-Range":"bytes 0-1023/4096"]
         if mode == "wrong-range" { headers["Content-Range"] = "bytes 1-1024/4096" }
         if mode == "bad-total" { headers["Content-Range"] = "bytes 0-1023/512" }
@@ -30,7 +32,22 @@ func progressiveTransportChecks(root: URL) async throws {
     }
     precondition(MediaRangeHTTP.allowedAfterRedirect(URL(string: "https://a1.vegslb.com/v.mp4?x=1")!) && MediaRangeHTTP.allowedAfterRedirect(URL(string: "https://a1.bdcgslb.com/v.mp4")!))
     precondition(!MediaRangeHTTP.allowed(URL(string: "https://a1.vegslb.com/v.mp4")!), "a scheduling domain is accepted only after a redirect")
-    precondition(!MediaRangeHTTP.allowedAfterRedirect(URL(string: "http://a1.vegslb.com/v.mp4")!) && !MediaRangeHTTP.allowedAfterRedirect(URL(string: "https://evilvegslb.com/v.mp4")!) && !MediaRangeHTTP.allowedAfterRedirect(URL(string: "https://example.com/v.mp4")!))
+    for followed in ["https://v3-a.idouyinvod.com/v.mp4", "https://x1.smtcdns.com/v.mp4?k=1", "https://cdn.example.com:443/v.mp4"] {
+        precondition(MediaRangeHTTP.allowedAfterRedirect(URL(string: followed)!), "CDN load-balancing redirect must be followed: " + followed)
+    }
+    for refused in ["http://a1.vegslb.com/v.mp4", "https://u:p@a1.smtcdns.com/v.mp4", "https://a1.smtcdns.com:8443/v.mp4",
+                    "https://10.0.0.1/v.mp4", "https://192.168.1.2/v.mp4", "https://[::1]/v.mp4", "https://localhost/v.mp4",
+                    "https://media.local/v.mp4", "https://intranet/v.mp4"] {
+        precondition(!MediaRangeHTTP.allowedAfterRedirect(URL(string: refused)!), "redirect must be refused: " + refused)
+    }
+    precondition(!MediaRangeHTTP.allowed(URL(string: "https://x1.smtcdns.com/v.mp4")!), "a redirect target is never accepted as the first URL")
+    RangeProbeProtocol.mode = "fail-twice"; RangeProbeProtocol.failures = 0
+    let recovered = try await MediaRangeHTTP.fetchRetrying(url, range: 0..<1024, configuration: configuration())
+    guard recovered.data.count == 1024, RangeProbeProtocol.failures == 2 else { throw NSError(domain: "RetryDidNotRecover", code: 1) }
+    RangeProbeProtocol.mode = "truncated"
+    do { _ = try await MediaRangeHTTP.fetchRetrying(url, range: 0..<1024, attempts: 2, configuration: configuration()); throw NSError(domain: "RetryHidPersistentFailure", code: 1) }
+    catch is MediaError { }
+    RangeProbeProtocol.mode = "valid"
     let good = try await MediaRangeHTTP.fetch(url, range: 0..<1024, configuration: configuration())
     guard good.total == 4096, good.data == Data(repeating: 7, count: 1024),
           RangeProbeProtocol.lastRequest?.value(forHTTPHeaderField: "Range") == "bytes=0-1023",

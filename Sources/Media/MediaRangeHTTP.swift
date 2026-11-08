@@ -22,11 +22,33 @@ final class MediaRangeHTTP: NSObject, URLSessionDataDelegate, @unchecked Sendabl
               let host = url.host?.lowercased(), url.port == nil || url.port == 443 else { return false }
         return ["qznovelvod.com", "fqnovelvod.com", "douyinvod.com"].contains { host == $0 || host.hasSuffix("." + $0) }
     }
-    /// A media host may answer 302 to its CDN's scheduling domain (seen 2026-11-06). Those are accepted only after a redirect from an allowed host.
+    /// An allowed media host may answer 302 to another CDN for load balancing. Seen so far: *.vegslb.com, *.bdcgslb.com
+    /// (2026-11-06), *.idouyinvod.com and *.smtcdns.com (2026-11-08). The set changes without notice and rejecting an
+    /// unlisted CDN made episodes fail at random, so any public HTTPS host name is followed. The first URL must still be
+    /// allowed(); credentials are never forwarded, and every reply is checked for an exact 206 range and the same total.
     static func allowedAfterRedirect(_ url: URL) -> Bool {
         guard url.scheme?.lowercased() == "https", url.user == nil, url.password == nil,
               let host = url.host?.lowercased(), url.port == nil || url.port == 443 else { return false }
-        return allowed(url) || ["vegslb.com", "bdcgslb.com"].contains { host.hasSuffix("." + $0) }
+        if allowed(url) { return true }
+        let labels = host.split(separator: ".", omittingEmptySubsequences: false)
+        guard labels.count >= 2, labels.allSatisfy({ !$0.isEmpty }), host.count <= 253,
+              !host.contains(":"), !labels.allSatisfy({ $0.allSatisfy(\.isNumber) }),
+              let top = labels.last, top.contains(where: \.isLetter) else { return false }
+        return !["localhost", "local", "internal", "lan", "home", "arpa"].contains(String(top))
+    }
+
+    /// Range read with retries for transient failures. A CDN switch or short network drop recovers on its own within a few seconds.
+    static func fetchRetrying(_ url: URL, range: Range<Int>, attempts: Int = 5,
+                              configuration: URLSessionConfiguration? = nil) async throws -> MediaRangeReply {
+        var delay: UInt64 = 400_000_000
+        for attempt in 1... {
+            do { return try await fetch(url, range: range, configuration: configuration) }
+            catch let error as MediaError where (error == .transport || error == .invalidMedia) && attempt < attempts {
+                try await Task.sleep(nanoseconds: delay)
+                delay = min(delay * 2, 4_000_000_000)
+            }
+        }
+        throw MediaError.transport
     }
     static func fetch(_ url: URL, range: Range<Int>, configuration: URLSessionConfiguration? = nil) async throws -> MediaRangeReply {
         guard allowed(url), range.lowerBound >= 0, !range.isEmpty, range.count <= 32 * 1024 * 1024,
