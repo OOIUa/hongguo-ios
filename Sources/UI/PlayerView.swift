@@ -26,6 +26,8 @@ struct PlayerScreen: View {
     /// Landscape is full-screen viewing, whether 全屏观看 turned the screen or the user did: episodes change from the
     /// controls, the episode sheet or autoplay rather than by swiping.
     @State private var landscape = false
+    /// Where a sideways drag across the picture began; set while that drag moves the progress.
+    @State private var seekDragStart: Double?
     /// Holding for 2× hides the same elements, for as long as the hold lasts.
     private var chromeHidden: Bool { cleanScreen || session.holding }
     /// Just under a picture wider than tall, as in the official app.
@@ -44,11 +46,12 @@ struct PlayerScreen: View {
                 VStack(spacing: 0) {
                     // The insets keep touches near the controls from reaching the picture; with the controls gone the whole screen responds.
                     Color.clear.frame(height: cleanScreen ? 0 : (geometry.size.height < 420 ? 58 : 70)).allowsHitTesting(false)
-                    VideoGestureView(enabled: !sliding && !episodesVisible && !speedsVisible && !detailVisible && !session.scrubbing,
+                    VideoGestureView(enabled: !sliding && !episodesVisible && !speedsVisible && !detailVisible && (!session.scrubbing || seekDragStart != nil),
                                      tap: videoTapped, doubleTap: videoDoubleTapped, holdBegan: session.beginHold, holdEnded: session.endHold,
                                      dragChanged: dragChanged, dragEnded: dragEnded, dragCancelled: dragCancelled,
+                                     seekChanged: seekDragChanged, seekEnded: seekDragEnded, seekCancelled: seekDragCancelled,
                                      pinched: { if !landscape { cleanScreen = $0 } })
-                        .accessibilityElement().accessibilityLabel("视频画面").accessibilityHint((session.isPlaying ? "轻点暂停" : "轻点继续播放") + (landscape ? "" : "，上下拖动切换剧集")).accessibilityAddTraits(.isButton)
+                        .accessibilityElement().accessibilityLabel("视频画面").accessibilityHint((session.isPlaying ? "轻点暂停" : "轻点继续播放") + "，左右拖动调整进度" + (landscape ? "" : "，上下拖动切换剧集")).accessibilityAddTraits(.isButton)
                         .accessibilityAction { session.toggle() }
                         .accessibilityAction(named: cleanScreen ? "退出清屏" : "清屏播放") { cleanScreen.toggle() }
                         .accessibilityAction(named: "快退 10 秒") { skip(forward: false) }
@@ -57,6 +60,10 @@ struct PlayerScreen: View {
                         .accessibilityAction(named: "上一集") { session.previous() }
                     Color.clear.frame(height: cleanScreen ? 0 : (geometry.size.height < 420 ? 112 : 174)).allowsHitTesting(false)
                 }.ignoresSafeArea(edges: cleanScreen ? .all : []).zIndex(1)
+                if let start = seekDragStart, session.duration > 0 {
+                    SeekDragBadge(target: session.previewPosition, duration: session.duration, delta: session.previewPosition - start)
+                        .allowsHitTesting(false).transition(.opacity).zIndex(1.7)
+                }
                 if let feedback = skipFeedback {
                     SkipBadge(feedback: feedback)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: feedback.forward ? .trailing : .leading)
@@ -148,6 +155,31 @@ struct PlayerScreen: View {
 
     private func videoDoubleTapped(at fraction: CGFloat) {
         if fraction < 0.3 { skip(forward: false) } else if fraction > 0.7 { skip(forward: true) } else if session.player != nil { session.toggle() }
+    }
+
+    // As in the official app: drag sideways across the picture to move the progress; the time shows in the middle and
+    // the jump happens on release. It shares the slider's preview, so the bar follows the finger.
+    private func seekDragChanged(_ fraction: CGFloat) {
+        if seekDragStart == nil {
+            let start = session.position
+            guard session.beginDragSeek() else { return }
+            seekDragStart = start
+        }
+        guard let start = seekDragStart else { return }
+        session.previewPosition = PlayerSession.dragSeekTarget(start: start, duration: session.duration, fraction: Double(fraction))
+    }
+
+    private func seekDragEnded(_ fraction: CGFloat) {
+        guard let start = seekDragStart else { return }
+        session.previewPosition = PlayerSession.dragSeekTarget(start: start, duration: session.duration, fraction: Double(fraction))
+        seekDragStart = nil
+        session.endDragSeek(from: start, commit: true)
+    }
+
+    private func seekDragCancelled() {
+        guard let start = seekDragStart else { return }
+        seekDragStart = nil
+        session.endDragSeek(from: start, commit: false)
     }
 
     private func skip(forward: Bool) {
@@ -352,6 +384,19 @@ private struct SkipBadge: View {
     }
 }
 
+private struct SeekDragBadge: View {
+    let target: Double
+    let duration: Double
+    let delta: Double
+    var body: some View {
+        VStack(spacing: 4) {
+            Text("\(timeLabel(target)) / \(timeLabel(duration))").font(.title3.weight(.semibold).monospacedDigit())
+            Text("\(delta >= 0 ? "快进" : "快退") \(Int(abs(delta))) 秒").font(.caption).foregroundStyle(.white.opacity(0.75))
+        }.padding(.horizontal, 20).padding(.vertical, 12).background(.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 14))
+        .accessibilityElement(children: .combine).accessibilityIdentifier("player.dragSeek")
+    }
+}
+
 private struct EpisodePlaceholder: View {
     let number: Int
     let title: String
@@ -373,6 +418,10 @@ private struct VideoGestureView: UIViewRepresentable {
     let dragChanged: (CGFloat) -> Void
     let dragEnded: (CGFloat, CGFloat) -> Void
     let dragCancelled: () -> Void
+    /// A sideways drag as a fraction of the width, negative to the left.
+    let seekChanged: (CGFloat) -> Void
+    let seekEnded: (CGFloat) -> Void
+    let seekCancelled: () -> Void
     /// true for fingers moving apart, false for fingers moving together. Fires once per gesture.
     let pinched: (Bool) -> Void
     func makeCoordinator() -> Coordinator { Coordinator(self) }
@@ -385,8 +434,11 @@ private struct VideoGestureView: UIViewRepresentable {
         // A vertical pan replaces the old one-shot swipes so the page follows the finger. While a hold is active the
         // pan cannot start, and a pan that starts first makes the hold fail, so 2x and paging never mix.
         let pan = UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.panned(_:))); pan.maximumNumberOfTouches = 1; pan.delegate = context.coordinator
+        // A mostly sideways pan moves the progress instead; each pan only begins in its own direction.
+        let seekPan = UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.seekPanned(_:))); seekPan.maximumNumberOfTouches = 1; seekPan.delegate = context.coordinator
+        context.coordinator.seekPan = seekPan
         let pinch = UIPinchGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.pinchChanged(_:)))
-        let recognizers: [UIGestureRecognizer] = [hold, doubleTap, tap, pan, pinch]
+        let recognizers: [UIGestureRecognizer] = [hold, doubleTap, tap, pan, seekPan, pinch]
         recognizers.forEach { $0.isEnabled = enabled; view.addGestureRecognizer($0) }
         return view
     }
@@ -394,10 +446,11 @@ private struct VideoGestureView: UIViewRepresentable {
         context.coordinator.parent = self
         uiView.gestureRecognizers?.forEach { if $0.isEnabled != enabled { $0.isEnabled = enabled } }
     }
-    static func dismantleUIView(_ uiView: UIView, coordinator: Coordinator) { coordinator.parent.holdEnded(); coordinator.parent.dragCancelled() }
+    static func dismantleUIView(_ uiView: UIView, coordinator: Coordinator) { coordinator.parent.holdEnded(); coordinator.parent.dragCancelled(); coordinator.parent.seekCancelled() }
     @MainActor final class Coordinator: NSObject, UIGestureRecognizerDelegate {
         var parent: VideoGestureView
         private var pinchDecided = false
+        weak var seekPan: UIPanGestureRecognizer?
         init(_ parent: VideoGestureView) { self.parent = parent }
         @objc func pinchChanged(_ gesture: UIPinchGestureRecognizer) {
             if gesture.state == .began { pinchDecided = false }
@@ -421,12 +474,22 @@ private struct VideoGestureView: UIViewRepresentable {
             default: break
             }
         }
+        @objc func seekPanned(_ gesture: UIPanGestureRecognizer) {
+            guard let view = gesture.view, view.bounds.width > 0 else { return }
+            let fraction = gesture.translation(in: view).x / view.bounds.width
+            switch gesture.state {
+            case .began, .changed: parent.seekChanged(fraction)
+            case .ended: parent.seekEnded(fraction)
+            case .cancelled, .failed: parent.seekCancelled()
+            default: break
+            }
+        }
         func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
             guard let pan = gestureRecognizer as? UIPanGestureRecognizer, let view = pan.view else { return true }
-            // A second finger makes this a pinch rather than a page drag.
+            // A second finger makes this a pinch rather than a page drag or a seek.
             guard pan.numberOfTouches <= 1 else { return false }
             let velocity = pan.velocity(in: view)
-            return abs(velocity.y) > abs(velocity.x)
+            return pan === seekPan ? abs(velocity.x) > abs(velocity.y) : abs(velocity.y) > abs(velocity.x)
         }
     }
 }

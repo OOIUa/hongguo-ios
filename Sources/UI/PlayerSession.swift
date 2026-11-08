@@ -168,6 +168,22 @@ final class PlayerSession: ObservableObject {
         position = target; saveProgress()
         return true
     }
+    /// A drag across the full width moves through the whole episode, or through this much of a longer one.
+    static let dragSeekSpan: Double = 180
+    /// Where a sideways drag of `fraction` of the width (negative to the left) lands from `start`, held a second short of the end like the skips.
+    nonisolated static func dragSeekTarget(start: Double, duration: Double, fraction: Double) -> Double {
+        guard duration > 0 else { return start }
+        return min(max(0, start + min(duration, dragSeekSpan) * fraction), max(0, duration - 1))
+    }
+    /// A sideways drag across the picture previews like the slider; releasing seeks only when the position really moved.
+    func beginDragSeek() -> Bool {
+        guard player != nil, rendered, !scrubbing, !holding, duration > 0, error == nil else { return false }
+        setSeeking(true); return true
+    }
+    func endDragSeek(from start: Double, commit: Bool) {
+        guard scrubbing else { return }
+        if commit, abs(previewPosition - start) > 0.2 { setSeeking(false) } else { scrubbing = false }
+    }
     func setSpeed(_ speed: Float) { app.speed = speed; holding = false; if isPlaying { player?.rate = speed } }
     func beginHold() { guard isPlaying, rendered, !scrubbing, !holding else { return }; holding = true; player?.rate = 2; Haptics.holdSpeedBegan() }
     func endHold() { guard holding else { return }; holding = false; if (player?.rate ?? 0) > 0 { player?.rate = app.speed } }
