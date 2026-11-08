@@ -3,24 +3,24 @@
   "message": "项目维护者发布的未签名 IPA；需要自行签名安装。",
   "identifier": "ooiua.hongguo-ios.source",
   "sourceURL": "https://raw.githubusercontent.com/OOIUa/hongguo-ios/main/distribution/source.json",
-  "sourceicon": "https://raw.githubusercontent.com/OOIUa/hongguo-ios/v0.1.16/distribution/icon.png",
+  "sourceicon": "https://raw.githubusercontent.com/OOIUa/hongguo-ios/v0.1.17/distribution/icon.png",
   "apps": [
     {
       "name": "红果独立版",
       "type": "1",
       "bundleIdentifier": "com.ooiua.hongguo.ios",
-      "version": "0.1.16",
-      "build": 17,
+      "version": "0.1.17",
+      "build": 18,
       "minimumOSVersion": "17.0",
-      "versionDate": "2026-11-07T22:09:27Z",
-      "versionDescription": "适配 iPhone Duo：改用 iOS 27.1 以上 SDK 构建，展开后按内屏尺寸运行；片单海报随屏幕宽度增加列数，推荐流顶栏避开外屏侧边的状态栏。\n长按视频左侧或右侧都可临时 2 倍速播放，松手恢复。\n未签名 IPA，需使用本人的证书签名后安装。",
+      "versionDate": "2026-11-08T11:36:39Z",
+      "versionDescription": "修复偶发的“视频下载失败”“视频播放失败”：片源服务器把部分请求转到其他 CDN 节点时不再拒绝，分段下载失败会自动重试。\n未签名 IPA，需使用本人的证书签名后安装。",
       "lock": "0",
-      "downloadURL": "https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.16/Hongguo-iOS-0.1.16-unsigned.ipa",
+      "downloadURL": "https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.17/Hongguo-iOS-0.1.17-unsigned.ipa",
       "isLanZouCloud": "0",
-      "iconURL": "https://raw.githubusercontent.com/OOIUa/hongguo-ios/v0.1.16/distribution/icon.png",
+      "iconURL": "https://raw.githubusercontent.com/OOIUa/hongguo-ios/v0.1.17/distribution/icon.png",
       "tintColor": "E8463F",
-      "size": "1748174",
-      "sha256": "a897d26081e31a39cb47731474644f492fc85203b8d18759cb0f8a3e850be07d"
+      "size": "1750641",
+      "sha256": "7786953766443734f0e0da3eb16d49b17e6b07dfc07230cf4442111f2419f5ee"
     }
   ]
 }
