@@ -13,8 +13,6 @@ struct PlayerScreen: View {
     /// 短剧详情 over the player; the episode waits paused underneath and goes on when the sheet closes.
     @State private var detailVisible = false
     @State private var resumeAfterDetail = false
-    /// The side badge after a double-tap skip; quick repeats on the same side add up.
-    @State private var skipFeedback: SkipFeedback?
     // Page drag: the current picture follows the finger and the neighbouring episode number slides in.
     @State private var pageHeight: CGFloat = 1
     @State private var dragOffset: CGFloat = 0
@@ -26,8 +24,10 @@ struct PlayerScreen: View {
     /// Landscape is full-screen viewing, whether 全屏观看 turned the screen or the user did: episodes change from the
     /// controls, the episode sheet or autoplay rather than by swiping.
     @State private var landscape = false
-    /// Where a sideways drag across the picture began; set while that drag moves the progress.
+    /// Where the progress was when a hold-then-drag began; set while that drag moves the progress.
     @State private var seekDragStart: Double?
+    /// Set when the episode changed under a hold-then-drag; the rest of that gesture moves nothing.
+    @State private var seekDragAbandoned = false
     /// Holding for 2× hides the same elements, for as long as the hold lasts.
     private var chromeHidden: Bool { cleanScreen || session.holding }
     /// Just under a picture wider than tall, as in the official app.
@@ -47,15 +47,13 @@ struct PlayerScreen: View {
                     // The insets keep touches near the controls from reaching the picture; with the controls gone the whole screen responds.
                     Color.clear.frame(height: cleanScreen ? 0 : (geometry.size.height < 420 ? 58 : 70)).allowsHitTesting(false)
                     VideoGestureView(enabled: !sliding && !episodesVisible && !speedsVisible && !detailVisible && (!session.scrubbing || seekDragStart != nil),
-                                     tap: videoTapped, doubleTap: videoDoubleTapped, holdBegan: session.beginHold, holdEnded: session.endHold,
+                                     tap: videoTapped, doubleTap: videoDoubleTapped, holdBegan: { seekDragAbandoned = false; session.beginHold() }, holdEnded: session.endHold,
                                      dragChanged: dragChanged, dragEnded: dragEnded, dragCancelled: dragCancelled,
                                      seekChanged: seekDragChanged, seekEnded: seekDragEnded, seekCancelled: seekDragCancelled,
                                      pinched: { if !landscape { cleanScreen = $0 } })
-                        .accessibilityElement().accessibilityLabel("视频画面").accessibilityHint((session.isPlaying ? "轻点暂停" : "轻点继续播放") + "，左右拖动调整进度" + (landscape ? "" : "，上下拖动切换剧集")).accessibilityAddTraits(.isButton)
+                        .accessibilityElement().accessibilityLabel("视频画面").accessibilityHint((session.isPlaying ? "轻点暂停" : "轻点继续播放") + "，长按后左右拖动调整进度" + (landscape ? "" : "，上下拖动切换剧集")).accessibilityAddTraits(.isButton)
                         .accessibilityAction { session.toggle() }
                         .accessibilityAction(named: cleanScreen ? "退出清屏" : "清屏播放") { cleanScreen.toggle() }
-                        .accessibilityAction(named: "快退 10 秒") { skip(forward: false) }
-                        .accessibilityAction(named: "快进 10 秒") { skip(forward: true) }
                         .accessibilityAction(named: "下一集") { session.next() }
                         .accessibilityAction(named: "上一集") { session.previous() }
                     Color.clear.frame(height: cleanScreen ? 0 : (geometry.size.height < 420 ? 112 : 174)).allowsHitTesting(false)
@@ -63,11 +61,6 @@ struct PlayerScreen: View {
                 if let start = seekDragStart, session.duration > 0 {
                     SeekDragBadge(target: session.previewPosition, duration: session.duration, delta: session.previewPosition - start)
                         .allowsHitTesting(false).transition(.opacity).zIndex(1.7)
-                }
-                if let feedback = skipFeedback {
-                    SkipBadge(feedback: feedback)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: feedback.forward ? .trailing : .leading)
-                        .padding(.horizontal, landscape ? 70 : 26).allowsHitTesting(false).transition(.opacity).zIndex(1.6)
                 }
                 if fullScreenOffered {
                     GeometryReader { full in
@@ -108,7 +101,7 @@ struct PlayerScreen: View {
                     .onChange(of: full.size) { _, size in pageHeight = max(size.height, 1); landscape = size.width > size.height }
             }.background(.black).ignoresSafeArea().allowsHitTesting(false)
         }
-        .preferredColorScheme(.dark).statusBarHidden(chromeHidden).persistentSystemOverlays(chromeHidden ? .hidden : .automatic)
+        .preferredColorScheme(.dark).statusBarHidden(landscape).persistentSystemOverlays(landscape && chromeHidden ? .hidden : .automatic)
             .sheet(isPresented: $episodesVisible) { episodeSheet }
             .sheet(isPresented: $speedsVisible) { speedSheet }
             .sheet(isPresented: $detailVisible, onDismiss: detailClosed) { detailSheet }
@@ -128,6 +121,9 @@ struct PlayerScreen: View {
                 }
             }
             .onChange(of: landscape) { _, _ in cleanScreen = false }
+            // An episode that changes mid-drag (autoplay at the end of a 2× hold, for example) ends that drag. The
+            // gesture view's own cancellation can arrive during a view update, where its state change is dropped.
+            .onChange(of: session.index) { _, _ in if seekDragStart != nil { seekDragCancelled(); seekDragAbandoned = true } }
             // In full screen the controls step aside after a few seconds of playback.
             .task(id: autoHideKey) {
                 guard landscape, !cleanScreen, session.isPlaying, !session.scrubbing, !episodesVisible, !speedsVisible, !detailVisible else { return }
@@ -145,21 +141,16 @@ struct PlayerScreen: View {
             }
     }
 
-    /// As in Bilibili-style players: a tap shows or hides the controls; a double tap on the left or right third jumps
-    /// 10 seconds back or ahead, and in the middle pauses or resumes. A pause brings the controls back by itself.
-    private func videoTapped(at fraction: CGFloat) {
-        // Taps that follow a skip on the same side keep skipping, so tap-tap-tap goes 20 seconds.
-        if let feedback = skipFeedback, feedback.forward ? fraction > 0.7 : fraction < 0.3 { skip(forward: feedback.forward); return }
-        cleanScreen.toggle()
-    }
+    /// A tap shows or hides the controls and a double tap anywhere pauses or resumes; a pause brings the controls back by
+    /// itself. There are no side double-tap skips: the progress moves only by holding and then dragging (Android issue #3).
+    private func videoTapped(at fraction: CGFloat) { cleanScreen.toggle() }
 
-    private func videoDoubleTapped(at fraction: CGFloat) {
-        if fraction < 0.3 { skip(forward: false) } else if fraction > 0.7 { skip(forward: true) } else if session.player != nil { session.toggle() }
-    }
+    private func videoDoubleTapped(at fraction: CGFloat) { if session.player != nil { session.toggle() } }
 
-    // As in the official app: drag sideways across the picture to move the progress; the time shows in the middle and
-    // the jump happens on release. It shares the slider's preview, so the bar follows the finger.
+    // Hold until 2×, then drag sideways to move the progress: the 2× ends, the time shows in the middle and the jump
+    // happens on release. A drag without the hold never seeks. It shares the slider's preview, so the bar follows.
     private func seekDragChanged(_ fraction: CGFloat) {
+        guard !seekDragAbandoned else { return }
         if seekDragStart == nil {
             let start = session.position
             guard session.beginDragSeek() else { return }
@@ -170,6 +161,7 @@ struct PlayerScreen: View {
     }
 
     private func seekDragEnded(_ fraction: CGFloat) {
+        seekDragAbandoned = false
         guard let start = seekDragStart else { return }
         session.previewPosition = PlayerSession.dragSeekTarget(start: start, duration: session.duration, fraction: Double(fraction))
         seekDragStart = nil
@@ -177,19 +169,10 @@ struct PlayerScreen: View {
     }
 
     private func seekDragCancelled() {
+        if seekDragStart == nil { seekDragAbandoned = false }
         guard let start = seekDragStart else { return }
         seekDragStart = nil
         session.endDragSeek(from: start, commit: false)
-    }
-
-    private func skip(forward: Bool) {
-        guard session.skip(by: forward ? 10 : -10) else { return }
-        let feedback = SkipFeedback(forward: forward, seconds: (skipFeedback?.forward == forward ? skipFeedback?.seconds ?? 0 : 0) + 10)
-        withAnimation(.easeOut(duration: 0.12)) { skipFeedback = feedback }
-        Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(900))
-            if skipFeedback == feedback { withAnimation(.easeOut(duration: 0.25)) { skipFeedback = nil } }
-        }
     }
 
     private func openDetail() {
@@ -328,7 +311,7 @@ struct PlayerScreen: View {
 
     private func bottomBar(compact: Bool) -> some View {
         VStack(alignment: .leading, spacing: compact ? 6 : 13) {
-            if !compact { HStack { Text("第 \(visibleEpisode.index) 集").font(.title3.bold()); Spacer(); Text("双击暂停 · 双击两侧快退/快进 · 长按 2×").font(.caption2).foregroundStyle(.white.opacity(0.55)).lineLimit(1).minimumScaleFactor(0.8) } }
+            if !compact { HStack { Text("第 \(visibleEpisode.index) 集").font(.title3.bold()); Spacer(); Text("双击暂停 · 长按 2× · 长按后左右拖动调进度").font(.caption2).foregroundStyle(.white.opacity(0.55)).lineLimit(1).minimumScaleFactor(0.8) } }
             HStack(spacing: 10) {
                 Text(timeLabel(session.scrubbing ? session.previewPosition : session.position)).font(.caption.monospacedDigit()).frame(minWidth: 36)
                 Slider(value: Binding(get: { session.scrubbing ? session.previewPosition : session.position }, set: { session.previewPosition = $0 }), in: 0...max(session.duration, 1), onEditingChanged: session.setSeeking).tint(Color(hex: 0xF08058)).disabled(session.duration <= 0).accessibilityLabel("播放进度")
@@ -365,22 +348,6 @@ struct PlayerScreen: View {
 
     private var speedSheet: some View {
         NavigationStack { List { ForEach([Float(0.5), 0.75, 1, 1.25, 1.5, 2], id: \.self) { speed in Button { session.setSpeed(speed); speedsVisible = false } label: { HStack { Text(String(format: "%g×", speed)); Spacer(); if session.app.speed == speed { Image(systemName: "checkmark").foregroundStyle(Color(hex: 0xF08058)) } }.foregroundStyle(.white).frame(minHeight: 33) } } }.navigationTitle("播放倍速").navigationBarTitleDisplayMode(.inline).toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { speedsVisible = false } } } }.presentationDetents([.height(405)]).presentationDragIndicator(.visible).preferredColorScheme(.dark)
-    }
-}
-
-private struct SkipFeedback: Equatable {
-    let forward: Bool
-    let seconds: Int
-    let id = UUID()
-}
-
-private struct SkipBadge: View {
-    let feedback: SkipFeedback
-    var body: some View {
-        VStack(spacing: 4) {
-            Image(systemName: feedback.forward ? "forward.fill" : "backward.fill").font(.system(size: 22))
-            Text("\(feedback.forward ? "+" : "-")\(feedback.seconds) 秒").font(.caption.weight(.semibold).monospacedDigit())
-        }.frame(width: 86, height: 86).background(.black.opacity(0.4), in: Circle()).accessibilityHidden(true)
     }
 }
 
@@ -428,17 +395,15 @@ private struct VideoGestureView: UIViewRepresentable {
     func makeUIView(context: Context) -> UIView {
         let view = UIView(); view.backgroundColor = .clear
         let hold = UILongPressGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.hold(_:))); hold.minimumPressDuration = 0.35; hold.allowableMovement = 18
-        // A single tap waits for the double tap to fail (about a quarter second), as in other players with double-tap skips.
+        // A single tap waits for the double tap to fail (about a quarter second), so a double tap does not also toggle the controls.
         let doubleTap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.doubleTapped(_:))); doubleTap.numberOfTapsRequired = 2; doubleTap.require(toFail: hold)
         let tap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.tapped(_:))); tap.require(toFail: hold); tap.require(toFail: doubleTap)
         // A vertical pan replaces the old one-shot swipes so the page follows the finger. While a hold is active the
-        // pan cannot start, and a pan that starts first makes the hold fail, so 2x and paging never mix.
+        // pan cannot start, and a pan that starts first makes the hold fail, so 2x and paging never mix. A sideways
+        // drag is not a pan at all: the progress moves only by moving the finger after the hold has begun.
         let pan = UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.panned(_:))); pan.maximumNumberOfTouches = 1; pan.delegate = context.coordinator
-        // A mostly sideways pan moves the progress instead; each pan only begins in its own direction.
-        let seekPan = UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.seekPanned(_:))); seekPan.maximumNumberOfTouches = 1; seekPan.delegate = context.coordinator
-        context.coordinator.seekPan = seekPan
         let pinch = UIPinchGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.pinchChanged(_:)))
-        let recognizers: [UIGestureRecognizer] = [hold, doubleTap, tap, pan, seekPan, pinch]
+        let recognizers: [UIGestureRecognizer] = [hold, doubleTap, tap, pan, pinch]
         recognizers.forEach { $0.isEnabled = enabled; view.addGestureRecognizer($0) }
         return view
     }
@@ -450,7 +415,9 @@ private struct VideoGestureView: UIViewRepresentable {
     @MainActor final class Coordinator: NSObject, UIGestureRecognizerDelegate {
         var parent: VideoGestureView
         private var pinchDecided = false
-        weak var seekPan: UIPanGestureRecognizer?
+        /// Where the finger was when the hold began, then where the seek began once it moved past the threshold.
+        private var holdAnchorX: CGFloat?
+        private var holdSeeking = false
         init(_ parent: VideoGestureView) { self.parent = parent }
         @objc func pinchChanged(_ gesture: UIPinchGestureRecognizer) {
             if gesture.state == .began { pinchDecided = false }
@@ -464,7 +431,34 @@ private struct VideoGestureView: UIViewRepresentable {
             guard let view = gesture.view, view.bounds.width > 0 else { return nil }
             return gesture.location(in: view).x / view.bounds.width
         }
-        @objc func hold(_ gesture: UILongPressGestureRecognizer) { if gesture.state == .began { parent.holdBegan() }; if [.ended, .cancelled, .failed].contains(gesture.state) { parent.holdEnded() } }
+        /// Holding plays at 2×; moving sideways past a small threshold while still holding ends the 2× and moves the progress.
+        @objc func hold(_ gesture: UILongPressGestureRecognizer) {
+            guard let view = gesture.view, view.bounds.width > 0 else { return }
+            let x = gesture.location(in: view).x
+            switch gesture.state {
+            case .began:
+                holdAnchorX = x; holdSeeking = false
+                parent.holdBegan()
+            case .changed:
+                guard let anchor = holdAnchorX else { return }
+                if !holdSeeking {
+                    guard abs(x - anchor) > Self.seekThreshold else { return }
+                    holdSeeking = true; holdAnchorX = x
+                    parent.holdEnded()
+                    UISelectionFeedbackGenerator().selectionChanged()
+                }
+                parent.seekChanged((x - (holdAnchorX ?? x)) / view.bounds.width)
+            case .ended:
+                if holdSeeking { parent.seekEnded((x - (holdAnchorX ?? x)) / view.bounds.width) } else { parent.holdEnded() }
+                holdAnchorX = nil; holdSeeking = false
+            case .cancelled, .failed:
+                if holdSeeking { parent.seekCancelled() }
+                parent.holdEnded()
+                holdAnchorX = nil; holdSeeking = false
+            default: break
+            }
+        }
+        static let seekThreshold: CGFloat = 10
         @objc func panned(_ gesture: UIPanGestureRecognizer) {
             guard let view = gesture.view else { return }
             switch gesture.state {
@@ -474,22 +468,12 @@ private struct VideoGestureView: UIViewRepresentable {
             default: break
             }
         }
-        @objc func seekPanned(_ gesture: UIPanGestureRecognizer) {
-            guard let view = gesture.view, view.bounds.width > 0 else { return }
-            let fraction = gesture.translation(in: view).x / view.bounds.width
-            switch gesture.state {
-            case .began, .changed: parent.seekChanged(fraction)
-            case .ended: parent.seekEnded(fraction)
-            case .cancelled, .failed: parent.seekCancelled()
-            default: break
-            }
-        }
         func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
             guard let pan = gestureRecognizer as? UIPanGestureRecognizer, let view = pan.view else { return true }
             // A second finger makes this a pinch rather than a page drag or a seek.
             guard pan.numberOfTouches <= 1 else { return false }
             let velocity = pan.velocity(in: view)
-            return pan === seekPan ? abs(velocity.x) > abs(velocity.y) : abs(velocity.y) > abs(velocity.x)
+            return abs(velocity.y) > abs(velocity.x)
         }
     }
 }

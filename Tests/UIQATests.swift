@@ -122,13 +122,19 @@ final class HongguoQATests: XCTestCase {
         func percent() -> Double { Double((progress.value as? String ?? "0").filter { $0.isNumber || $0 == "." }) ?? 0 }
         point(0.5).doubleTap()
         XCTAssertTrue(app.buttons["继续播放"].waitForExistence(timeout: 3), "double tap in the middle pauses")
+        // No side skips: a double tap on either side also just plays or pauses.
         let start = percent()
-        point(0.88).doubleTap(); sleep(1)
-        let ahead = percent()
-        capture("20-skip-forward")
-        XCTAssertGreaterThan(ahead, start + 5, "double tap on the right jumps ahead (\(start) -> \(ahead))")
-        point(0.12).doubleTap(); sleep(1)
-        XCTAssertLessThan(abs(percent() - start), 3, "double tap on the left jumps back")
+        point(0.88).doubleTap()
+        XCTAssertTrue(app.buttons["暂停"].waitForExistence(timeout: 5), "double tap on the right resumes")
+        point(0.12).doubleTap()
+        XCTAssertTrue(app.buttons["继续播放"].waitForExistence(timeout: 5), "double tap on the left pauses")
+        XCTAssertLessThan(abs(percent() - start), 3, "side double taps do not jump")
+        // A sideways swipe without holding never seeks; holding first and then dragging does.
+        point(0.2).press(forDuration: 0.05, thenDragTo: point(0.8)); sleep(1)
+        XCTAssertLessThan(abs(percent() - start), 3, "a quick sideways swipe does not seek")
+        point(0.2).press(forDuration: 0.8, thenDragTo: point(0.7)); sleep(1)
+        capture("20-hold-drag-seek")
+        XCTAssertGreaterThan(percent(), start + 5, "holding and dragging right moves ahead")
         // Hidden controls stay in the tree at zero opacity; with them gone the picture's touch area fills the screen.
         point(0.85).tap(); sleep(1)
         capture("22-tap-hides")

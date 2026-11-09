@@ -157,27 +157,17 @@ final class PlayerSession: ObservableObject {
 
     func toggle() { if finished { load(index: index, startAt: 0) } else if isPlaying || (player?.rate ?? 0) > 0 { pause() } else { endHold(); endMessage = nil; currentStream?.resume(); player?.playImmediately(atRate: app.speed) } }
     func pause() { endHold(); player?.pause(); currentStream?.pause(); isPlaying = false; saveProgress(flush: true) }
-    /// Double-tapping a side of the picture jumps back or ahead, stopping short of the end so it never ends the episode.
-    @discardableResult
-    func skip(by seconds: Double) -> Bool {
-        guard let player, rendered, !scrubbing, duration > 0 else { return false }
-        let target = min(max(0, position + seconds), max(0, duration - 1))
-        guard abs(target - position) > 0.2 else { return false }
-        finished = false; endMessage = nil
-        player.seek(to: CMTime(seconds: target, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
-        position = target; saveProgress()
-        return true
-    }
     /// A drag across the full width moves through the whole episode, or through this much of a longer one.
     static let dragSeekSpan: Double = 180
-    /// Where a sideways drag of `fraction` of the width (negative to the left) lands from `start`, held a second short of the end like the skips.
+    /// Where a sideways drag of `fraction` of the width (negative to the left) lands from `start`, held a second short of the end.
     nonisolated static func dragSeekTarget(start: Double, duration: Double, fraction: Double) -> Double {
         guard duration > 0 else { return start }
         return min(max(0, start + min(duration, dragSeekSpan) * fraction), max(0, duration - 1))
     }
     /// A sideways drag across the picture previews like the slider; releasing seeks only when the position really moved.
     func beginDragSeek() -> Bool {
-        guard player != nil, rendered, !scrubbing, !holding, duration > 0, error == nil else { return false }
+        // A seek starts from a hold, so a 2× hold in progress is ended (by setSeeking) rather than refused.
+        guard player != nil, rendered, !scrubbing, duration > 0, error == nil else { return false }
         setSeeking(true); return true
     }
     func endDragSeek(from start: Double, commit: Bool) {
