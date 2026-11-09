@@ -1,17 +1,17 @@
 {
-  "version": "0.1.18",
-  "build": 19,
+  "version": "0.1.19",
+  "build": 20,
   "minimumOSVersion": "17.0",
   "releaseNotes": [
-    "播放页可在画面上左右滑动调整进度：中间显示目标时间，进度条同步移动，松手跳转；上下滑动仍切集。",
-    "0.1.17 起修复偶发的视频下载 / 播放失败。"
+    "修复部分剧集一直提示片源不可用、无法播放（如《和离后我带女儿横扫魔域第二季》第 5 集起的部分分集）：未加密的分集确认视频文件无加密后正常播放，单条请求线路返回的片源不可用时自动改试其他线路。",
+    "0.1.18 起可在画面上左右滑动调整进度。"
   ],
-  "publishedAt": "2026-11-08T11:54:21Z",
-  "downloadURL": "https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.18/Hongguo-iOS-0.1.18-unsigned.ipa",
-  "sha256": "4d828bbe6fccd019293c2162576b7be50357ec6269a126f98d997026154363ca",
-  "size": 1757871,
+  "publishedAt": "2026-11-09T06:58:01Z",
+  "downloadURL": "https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.19/Hongguo-iOS-0.1.19-unsigned.ipa",
+  "sha256": "ad8facd8da8ef4bebdfcfe3735f8837061b3211697041becadd22a3fecc98107",
+  "size": 1759309,
   "mirrors": {
-    "gh-proxy": "https://gh-proxy.com/https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.18/Hongguo-iOS-0.1.18-unsigned.ipa",
-    "ghfast": "https://ghfast.top/https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.18/Hongguo-iOS-0.1.18-unsigned.ipa"
+    "gh-proxy": "https://gh-proxy.com/https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.19/Hongguo-iOS-0.1.19-unsigned.ipa",
+    "ghfast": "https://ghfast.top/https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.19/Hongguo-iOS-0.1.19-unsigned.ipa"
   }
 }
