@@ -66,7 +66,7 @@ actor MediaPreparer {
             let work = Task.detached(priority: .userInitiated) {
                 if track.encrypted {
                     try MP4Processor.decrypt(url: staging, spade: track.spadeA, progress: progress)
-                } else { try MP4Processor.validate(url: staging) }
+                } else { try MP4Processor.validate(url: staging, requirePlain: true) }
             }
             try await withTaskCancellationHandler(operation: { try await work.value }, onCancel: { work.cancel() })
             try Task.checkCancellation()

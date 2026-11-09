@@ -72,6 +72,19 @@ func child(_ d: Data, _ n: Node, _ type: String, skip: Int = 0) -> Node { nodes(
         for n in [m8,t8,md8,mn8,sb8] {encrypted8.replaceSubrange(n.start..<(n.start+4),with:be32(n.end-n.start-count*8))}
         let out8=base.appendingPathComponent("encrypted8.mp4");try encrypted8.write(to:out8)
 
+        // A row without encryption info plays as plain only when its index has no encv/enca, sinf or senc.
+        try MP4Processor.validate(url:origin,requirePlain:true)
+        for protected in [output,out8] {
+            do {try MP4Processor.validate(url:protected,requirePlain:true);fatalError("Protected media accepted as plain")} catch MediaError.unsupported {}
+        }
+        var clearSinf=original;clearSinf.insert(contentsOf:sinf,at:entry.end)
+        for n in [moov,trak,mdia,minf,stbl,stsd,entry] {clearSinf.replaceSubrange(n.start..<(n.start+4),with:be32(n.end-n.start+sinf.count))}
+        let sinfOnly=base.appendingPathComponent("sinf-only.mp4");try clearSinf.write(to:sinfOnly)
+        do {try MP4Processor.validate(url:sinfOnly,requirePlain:true);fatalError("sinf on a clear entry accepted as plain")} catch MediaError.invalidMedia {}
+        var clearSenc=original;clearSenc.insert(contentsOf:senc,at:stbl.end)
+        for n in [moov,trak,mdia,minf,stbl] {clearSenc.replaceSubrange(n.start..<(n.start+4),with:be32(n.end-n.start+senc.count))}
+        let sencOnly=base.appendingPathComponent("senc-only.mp4");try clearSenc.write(to:sencOnly)
+        do {try MP4Processor.validate(url:sencOnly,requirePlain:true);fatalError("senc on a clear track accepted as plain")} catch MediaError.invalidMedia {}
         let spade=Data(hex:"93bc1df253ba1bf7618b19c448b806f64d810afc45b715fe5eb925f26cbf12f541ba098282")!.base64EncodedString()
         let decodedKey = try SpadeKey.decode(spade); precondition(decodedKey == key)
         try MP4Processor.decrypt(url:output,spade:spade,progress:{_,_ in})
@@ -83,6 +96,7 @@ func child(_ d: Data, _ n: Node, _ type: String, skip: Int = 0) -> Node { nodes(
         let cancelled=Task.detached {try Task.checkCancellation();try await Task.sleep(nanoseconds:100_000_000);try MP4Processor.decrypt(url:output,spade:spade,progress:{_,_ in})}
         cancelled.cancel();do{try await cancelled.value;fatalError("Cancellation ignored")}catch is CancellationError {}
 
+        try MP4Processor.validate(url:output,requirePlain:true)
         let clear=try Data(contentsOf:output)
         for i in 0..<count {precondition(clear.subdata(in:offsets[i]..<(offsets[i]+sizes[i]))==original.subdata(in:offsets[i]..<(offsets[i]+sizes[i])))}
         let unpublished=base.appendingPathComponent("unpublished.part",isDirectory:true);try FileManager.default.createDirectory(at:unpublished,withIntermediateDirectories:true);let part=unpublished.appendingPathComponent("video.mp4");try? FileManager.default.removeItem(at:part);try FileManager.default.copyItem(at:output,to:part);let partPlayable=try await AVURLAsset(url:part).load(.isPlayable);precondition(partPlayable);let asset=AVURLAsset(url:output);let playable=try await asset.load(.isPlayable);precondition(playable)

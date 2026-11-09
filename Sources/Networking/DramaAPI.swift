@@ -207,9 +207,13 @@ actor DramaAPI {
         let biz: [String: Any] = ["detail_page_version":0,"device_level":1,"disable_digg_stat":false,"need_all_video_definition":true,
             "need_mp4_align":false,"use_os_player":false,"use_server_dns":false,"video_platform":1024]
         let body = try ProtocolJSON.data(["biz_param":biz,"mixed_video_id_map":["1004":[episodeID]]])
-        let model = try await playbackModel(episodeID: episodeID, body: body)
-        guard !model.isEmpty else { throw HGError.message("服务暂未返回当前分集片源") }
-        return try await modelTrack(model)
+        return try await playbackTrack(
+            identity: { [self] in try await freshPlaybackIdentity() },
+            read: { [self] route, identity in try await readPlaybackRoute(route, episodeID: episodeID, body: body, identity: identity) },
+            use: { [self] model in
+                guard !model.isEmpty else { throw HGError.message("服务暂未返回当前分集片源") }
+                return try await modelTrack(model)
+            })
     }
 
     /// Picks a track from a playback model. Inline rows with neither a key nor a declared encryption state may use the
@@ -230,14 +234,31 @@ actor DramaAPI {
             try Self.confirmSameVideo(model, info)
             return try await fallbackTrack(info, address: address, read: read)
         } catch let incomplete as IncompleteEncryption {
-            let id = ProtocolJSON.text(model["video_id"]).trimmingCharacters(in: .whitespacesAndNewlines), duration = Double(ProtocolJSON.text(model["video_duration"])) ?? 0
-            guard !id.isEmpty, duration > 0, incomplete.minimumPixels > 0, !address.isEmpty else { throw incomplete }
-            let info = try fallbackInfo(try await read(address)), other = Double(ProtocolJSON.text(info["video_duration"])) ?? 0
-            guard ProtocolJSON.text(info["video_id"]) == id, other > 0, abs(other - duration) <= 0.5 else {
-                throw HGError.message("备用片源编号或完整时长无法确认，已停止取址")
+            do {
+                return try await verifiedFallback(model, address: address, incomplete: incomplete, read: read)
+            } catch is CancellationError { throw CancellationError()
+            } catch {
+                try Task.checkCancellation()
+                // 2026-11-09 (Android issue #3, season 2 episodes 14, 18, …): the server leaves encrypt_info out entirely
+                // for episodes whose media is plain hvc1. When no fallback confirms a source, those undeclared rows play as
+                // plain; ProgressiveSource and MP4Processor.validate(requirePlain:) refuse an index with encv/enca/sinf/senc.
+                // Rows that declare encryption but lack spade_a are still refused.
+                if let plain = try? selectTrack(model, requireEncryption: true, minimumPixels: 0, acceptUndeclared: true) { return plain }
+                throw error
             }
-            return try selectTrack(info, requireEncryption: true, minimumPixels: incomplete.minimumPixels)
         }
+    }
+
+    /// A fallback for inline rows without encryption metadata must match the model's id, full duration and quality.
+    private func verifiedFallback(_ model: [String: Any], address: String, incomplete: IncompleteEncryption,
+                                  read: @Sendable (String) async throws -> [String: Any]) async throws -> VideoTrack {
+        let id = ProtocolJSON.text(model["video_id"]).trimmingCharacters(in: .whitespacesAndNewlines), duration = Double(ProtocolJSON.text(model["video_duration"])) ?? 0
+        guard !id.isEmpty, duration > 0, incomplete.minimumPixels > 0, !address.isEmpty else { throw incomplete }
+        let info = try fallbackInfo(try await read(address)), other = Double(ProtocolJSON.text(info["video_duration"])) ?? 0
+        guard ProtocolJSON.text(info["video_id"]) == id, other > 0, abs(other - duration) <= 0.5 else {
+            throw HGError.message("备用片源编号或完整时长无法确认，已停止取址")
+        }
+        return try selectTrack(info, requireEncryption: true, minimumPixels: incomplete.minimumPixels)
     }
 
     private func checkedFallback(_ address: String) throws -> URL { try checkedURL(address, domains: ["fqnovel.com","snssdk.com"]) }
@@ -292,7 +313,9 @@ actor DramaAPI {
         var errorDescription: String? { "当前分集的播放地址或解密信息暂时不可用" }
     }
 
-    private func selectTrack(_ info: [String: Any], requireEncryption: Bool, minimumPixels: Int) throws -> VideoTrack {
+    /// `acceptUndeclared`: rows whose encrypt_info carries no encrypt flag at all are taken as plain; the media index
+    /// is checked separately before playback.
+    private func selectTrack(_ info: [String: Any], requireEncryption: Bool, minimumPixels: Int, acceptUndeclared: Bool = false) throws -> VideoTrack {
         let rawList = info["video_list"]
         let items = (rawList as? [Any] ?? Array(ProtocolJSON.dictionary(rawList).values)).map { ProtocolJSON.dictionary($0) }
         let compatible = items.compactMap { item -> (item: [String: Any], rank: Int, pixels: Int, shortSide: Int, quality: String)? in
@@ -314,7 +337,8 @@ actor DramaAPI {
         let seedText = ProtocolJSON.text(info["key_seed"]), seed = Self.base64(seedText)
         for row in rows {
             let encryptInfo = ProtocolJSON.dictionary(row.item["encrypt_info"]), spade = firstText(row.item["spade_a"],encryptInfo["spade_a"])
-            if requireEncryption && spade.isEmpty && !["false","0"].contains(ProtocolJSON.text(encryptInfo["encrypt"]).lowercased()) {
+            if requireEncryption && spade.isEmpty && !["false","0"].contains(ProtocolJSON.text(encryptInfo["encrypt"]).lowercased())
+                && !(acceptUndeclared && encryptInfo["encrypt"] == nil) {
                 if encryptInfo["encrypt"] == nil { incomplete = true }
                 continue
             }
@@ -354,40 +378,65 @@ actor DramaAPI {
     /// registration cookie or x-ss-stub is rejected too (hongguoTV 0.1.22-0.1.25). A signed read still comes back empty
     /// now and then depending on identity and path, and a new identity usually recovers, so the plan is: the official
     /// GET, then POST, then a new identity on GET and on the alternate host. The whole read is bounded.
-    private func playbackModel(episodeID: String, body: Data) async throws -> [String: Any] {
-        var identity = try await freshPlaybackIdentity()
+    /// Identities and routes do not always answer with the same model (2026-11-09: GET sometimes gave only keyless inline
+    /// rows for an episode whose POST gave a full 1080P), so a model that yields no track moves on to the next route too.
+    /// Only after every route fails is the model error reported, ahead of HTTP or empty-response errors.
+    func playbackTrack(routes: [PlaybackRoute] = DramaAPI.playbackRoutes, budget: TimeInterval = 20,
+                       identity newIdentity: @Sendable () async throws -> RegisteredIdentity,
+                       read: @Sendable (PlaybackRoute, RegisteredIdentity) async throws -> PlaybackRead,
+                       use: @Sendable ([String: Any]) async throws -> VideoTrack) async throws -> VideoTrack {
+        var identity = try await newIdentity()
         var trace: [String] = []
-        var failure: Error?
+        var failure: Error?, modelFailure: Error?
         var onlyEmpty = true
         let started = Date()
         defer { lastPlaybackTrace = trace.joined(separator: " ") }
-        for route in Self.playbackRoutes {
-            guard Date().timeIntervalSince(started) < 20 else { break }
+        for route in routes {
+            guard Date().timeIntervalSince(started) < budget else { break }
             try Task.checkCancellation()
-            if route.renewsIdentity, let renewed = try? await freshPlaybackIdentity() { identity = renewed; trace.append("new") }
+            if route.renewsIdentity, let renewed = try? await newIdentity() { identity = renewed; trace.append("new") }
             let label = (route.post ? "P:" : "G:") + (route.host == Self.playbackHost ? "b" : "hl")
+            let model: [String: Any]
             do {
-                let signed = try await signedPlaybackRequest(route: route, episodeID: episodeID, body: body, identity: identity)
-                let data = try await fetch(url: signed.url, body: route.post ? body : nil, headers: signed.headers, timeout: 8)
-                guard !data.isEmpty else { trace.append(label + "=0B"); continue }
-                if !route.post {
-                    if let model = Self.tabVideoModel(data, episodeID: episodeID) { trace.append(label + "=ok"); return model }
-                    trace.append(label + "=invalid"); onlyEmpty = false; continue
+                switch try await read(route, identity) {
+                case .empty: trace.append(label + "=0B"); continue
+                case .invalid: trace.append(label + "=invalid"); onlyEmpty = false; continue
+                case .model(let value): model = value
                 }
-                guard let response = try? ProtocolJSON.object(data) else { trace.append(label + "=invalid"); onlyEmpty = false; continue }
-                guard ProtocolJSON.integer(response["code"] ?? response["Code"]) == 0 else {
-                    trace.append(label + "=rejected"); throw HGError.message("当前分集暂未提供播放信息")
-                }
-                trace.append(label + "=ok")
-                return ProtocolJSON.dictionary(ProtocolJSON.dictionary(ProtocolJSON.dictionary(response["data"])[episodeID])["video_model"])
             } catch is CancellationError { throw CancellationError()
             } catch let error as HGError {
-                if case .message(let text) = error, text == "当前分集暂未提供播放信息" { throw error }
-                trace.append(label + "=failed"); onlyEmpty = false; failure = error
-            } catch { trace.append(label + "=failed"); onlyEmpty = false; failure = error }
+                if case .message(let text) = error, text == Self.rejectedPlayback { trace.append(label + "=rejected"); throw error }
+                trace.append(label + "=failed"); onlyEmpty = false; failure = error; continue
+            } catch { trace.append(label + "=failed"); onlyEmpty = false; failure = error; continue }
+            onlyEmpty = false
+            do {
+                let track = try await use(model)
+                trace.append(label + "=ok")
+                return track
+            } catch is CancellationError { throw CancellationError()
+            } catch {
+                try Task.checkCancellation()
+                trace.append(label + "=unusable")
+                if modelFailure == nil { modelFailure = error }
+            }
         }
+        if let modelFailure { throw modelFailure }
         if onlyEmpty { throw HGError.message("播放服务返回空响应，疑似播放设备身份被拒，请稍后重试") }
         throw failure ?? HGError.message("服务暂未返回当前分集片源")
+    }
+
+    /// One route's answer: a model, 0 bytes, or a body that is not a usable model response.
+    enum PlaybackRead { case model([String: Any]), empty, invalid }
+    private static let rejectedPlayback = "当前分集暂未提供播放信息"
+
+    private func readPlaybackRoute(_ route: PlaybackRoute, episodeID: String, body: Data, identity: RegisteredIdentity) async throws -> PlaybackRead {
+        let signed = try await signedPlaybackRequest(route: route, episodeID: episodeID, body: body, identity: identity)
+        let data = try await fetch(url: signed.url, body: route.post ? body : nil, headers: signed.headers, timeout: 8)
+        guard !data.isEmpty else { return .empty }
+        if !route.post { return Self.tabVideoModel(data, episodeID: episodeID).map { .model($0) } ?? .invalid }
+        guard let response = try? ProtocolJSON.object(data) else { return .invalid }
+        guard ProtocolJSON.integer(response["code"] ?? response["Code"]) == 0 else { throw HGError.message(Self.rejectedPlayback) }
+        return .model(ProtocolJSON.dictionary(ProtocolJSON.dictionary(ProtocolJSON.dictionary(response["data"])[episodeID])["video_model"]))
     }
 
     struct PlaybackRoute: Sendable, Equatable { let post: Bool; let host: String; let renewsIdentity: Bool }

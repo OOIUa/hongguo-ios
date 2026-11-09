@@ -102,6 +102,13 @@ private func check(_ condition: Bool, _ label: String) throws {
         let plainBytes = try await plain.read(at: 500_003, count: 32_001)
         try check(plainBytes == fixture.plain.subdata(in: 500_003..<532_004), "Plain MP4 range mismatch")
         await plain.close()
+        // A row without encryption info is opened as plain; a CENC index behind it must still be refused.
+        let protectedServer = FixtureServer(fixture.encrypted)
+        do {
+            let protected = try await ProgressiveSource.open(track: plainTrack, episodeID: "plain-protected", cache: cache, fetch: { try await protectedServer.fetch($0) })
+            await protected.close()
+            try check(false, "Protected media opened as plain")
+        } catch MediaError.unsupported {}
 
         let slow = FixtureServer(fixture.encrypted)
         let closing = try await ProgressiveSource.open(track: track, episodeID: "cancel", cache: cache, fetch: { try await slow.fetch($0) })

@@ -301,13 +301,76 @@ import JavaScriptCore
         let verified = try await trackAPI.modelTrack(incompleteModel) { _ in fallbackReply("v0abc", 60.2, 1080) }
         precondition(verified.url.absoluteString == "https://v1.qznovelvod.com/keyed.mp4" && verified.encrypted)
         for reply in [fallbackReply("v0other", 60, 1080), fallbackReply("v0abc", 30, 1080), fallbackReply("v0abc", 60, 720)] {
-            let unverified = try? await trackAPI.modelTrack(incompleteModel) { _ in reply }
-            precondition(unverified == nil, "A fallback that fails id, duration or quality must not be used")
+            // The fallback that fails id, duration or quality is not used; the undeclared inline row plays as plain,
+            // and its media index is checked separately (MP4Processor.validate(requirePlain:), ProgressiveSource).
+            let plain = try await trackAPI.modelTrack(incompleteModel) { _ in reply }
+            precondition(plain.url.absoluteString == "https://v1.qznovelvod.com/nokey.mp4" && !plain.encrypted && plain.spadeA.isEmpty,
+                          "A fallback that fails id, duration or quality must not be used")
         }
+        // 2026-11-09 (Android issue #3): plain episodes leave encrypt_info out entirely and may have no fallback at all.
+        let noFallback = try await trackAPI.modelTrack(["video_list":[videoRow("bytevc1","https://v1.qznovelvod.com/plain.mp4",720)]]) { _ in
+            fatalError("A model without fallback_api must not read one")
+        }
+        precondition(noFallback.url.absoluteString == "https://v1.qznovelvod.com/plain.mp4" && !noFallback.encrypted && noFallback.spadeA.isEmpty)
+        let failedRead = try await trackAPI.modelTrack(incompleteModel) { _ in throw URLError(.timedOut) }
+        precondition(failedRead.url.absoluteString == "https://v1.qznovelvod.com/nokey.mp4" && !failedRead.encrypted)
+        // A keyed row still wins over an undeclared one of the same rank and size.
+        var mixed = incompleteModel
+        mixed["video_list"] = [videoRow("h264","https://v1.qznovelvod.com/nokey.mp4",1080), videoRow("h264","https://v1.qznovelvod.com/keyed.mp4",720).merging(["spade_a":spadeSample]) { $1 }]
+        let keyedFirst = try await trackAPI.modelTrack(mixed) { _ in fallbackReply("v0abc", 60, 1080) }
+        precondition(keyedFirst.url.absoluteString == "https://v1.qznovelvod.com/keyed.mp4" && keyedFirst.encrypted)
         var declared = incompleteModel
         declared["video_list"] = [videoRow("h264","https://v1.qznovelvod.com/nokey.mp4",1080).merging(["encrypt_info":["encrypt":true]]) { $1 }]
         let declaredTrack = try? await trackAPI.modelTrack(declared) { _ in fatalError("A declared-encrypted row must not read the fallback") }
         precondition(declaredTrack == nil)
+        for flag in [true, "true", 1] as [Any] {
+            var keyless = incompleteModel
+            keyless["video_list"] = [videoRow("h264","https://v1.qznovelvod.com/nokey.mp4",1080).merging(["encrypt_info":["encrypt":flag]]) { $1 }]
+            let refused = try? await trackAPI.modelTrack(keyless) { _ in fallbackReply("v0other", 60, 1080) }
+            precondition(refused == nil, "A row that declares encryption without spade_a must never play as plain")
+        }
+        // A model that yields no track on one route moves on to the next route (2026-11-09: GET gave keyless rows, POST a full model).
+        final class RouteCalls: @unchecked Sendable { var routes = [DramaAPI.PlaybackRoute](); var identities = 0 }
+        let routeIdentity = RegisteredIdentity(deviceID: "7777777777777777", installID: "8888888888888888", cdid: "cdid-route", appDeviceCookie: "")
+        let keylessModel: [String: Any] = ["video_list":[videoRow("h264","https://v1.qznovelvod.com/nokey.mp4",1080).merging(["encrypt_info":["encrypt":true]]) { $1 }]]
+        let keyedModel: [String: Any] = ["video_list":[videoRow("h264","https://v1.qznovelvod.com/keyed.mp4",1080).merging(["spade_a":spadeSample]) { $1 }]]
+        let routeCalls = RouteCalls()
+        let routeRecovered = try await trackAPI.playbackTrack(identity: { routeCalls.identities += 1; return routeIdentity },
+            read: { route, _ in routeCalls.routes.append(route); return .model(route.post ? keyedModel : keylessModel) },
+            use: { try await trackAPI.modelTrack($0) })
+        precondition(routeRecovered.url.absoluteString == "https://v1.qznovelvod.com/keyed.mp4" && routeCalls.routes == Array(DramaAPI.playbackRoutes.prefix(2)))
+        let routeTrace = await trackAPI.lastPlaybackTrace
+        precondition(routeTrace == "G:b=unusable P:b=ok", routeTrace)
+        // Every route failing: the model error is reported ahead of HTTP and empty-response errors.
+        let allCalls = RouteCalls()
+        do {
+            _ = try await trackAPI.playbackTrack(identity: { allCalls.identities += 1; return routeIdentity },
+                read: { route, _ in
+                    allCalls.routes.append(route)
+                    if route.post { if route.host == DramaAPI.playbackHost { return .empty }; throw URLError(.timedOut) }
+                    return .model(keylessModel)
+                }, use: { try await trackAPI.modelTrack($0) })
+            fatalError("Keyless encrypted rows on every route must not play")
+        } catch {
+            precondition(error.localizedDescription == "当前分集的播放地址或解密信息暂时不可用", error.localizedDescription)
+            precondition(!(error is URLError))
+        }
+        precondition(allCalls.routes == DramaAPI.playbackRoutes && allCalls.identities == 2)
+        // Without any model the earlier errors keep their meaning.
+        do {
+            _ = try await trackAPI.playbackTrack(identity: { routeIdentity }, read: { _, _ in .empty }, use: { _ in fatalError("No model") })
+            fatalError("Empty answers must fail")
+        } catch { precondition(error.localizedDescription.contains("空响应")) }
+        do {
+            _ = try await trackAPI.playbackTrack(identity: { routeIdentity }, read: { route, _ in if route.post { throw URLError(.timedOut) }; return .empty }, use: { _ in fatalError("No model") })
+            fatalError("Failed reads must fail")
+        } catch { precondition(error is URLError) }
+        // A server rejection still ends the fetch at once.
+        let rejectCalls = RouteCalls()
+        do {
+            _ = try await trackAPI.playbackTrack(identity: { routeIdentity }, read: { route, _ in rejectCalls.routes.append(route); throw HGError.message("当前分集暂未提供播放信息") }, use: { _ in fatalError("No model") })
+            fatalError("Rejected episodes must fail")
+        } catch { precondition(error.localizedDescription == "当前分集暂未提供播放信息" && rejectCalls.routes.count == 1) }
         print("PASS: video_tab playback model request and parsing.")
         print("PASS: 4 original Node signing vectors; exact 20/30-digit IDs; numeric-token parsing; binary/gzip body digest; URL spaces; cancelled query rejects before HTTP.")
     }

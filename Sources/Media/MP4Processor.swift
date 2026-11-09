@@ -115,6 +115,7 @@ enum MP4Processor {
         let roots = try parse(bytes, start: 0, end: bytes.count, depth: 0, count: &count)
         guard roots.count == 1, roots[0].type == "moov", roots[0].children.contains(where: { $0.type == "trak" }) else { throw MediaError.invalidMedia }
         let tracks = try readTracks(bytes, moov: roots[0], layout: layout)
+        // A plain track must really be plain: readTracks refuses sinf/senc on clear entries and returns every encv/enca.
         guard encrypted ? !tracks.isEmpty : tracks.isEmpty else { throw MediaError.unsupported }
         let video = tracks.first { $0.handler == "vide" }
         if encrypted && video == nil { throw MediaError.unsupported }
@@ -136,11 +137,15 @@ enum MP4Processor {
         guard nalChainValid(plain, lengthBytes: plan.nalLength) else { throw MediaError.invalidKey }
     }
 
-    static func validate(url: URL) throws {
+    /// `requirePlain`: a source the server gave without encryption info is taken as plain only when its index says so,
+    /// with no encv/enca sample entry, sinf or senc (2026-11-09, Android issue #3).
+    static func validate(url: URL, requirePlain: Bool = false) throws {
         let layout = try inspectFile(url)
         var count = 0
-        let roots = try parse(Array(layout.moov), start: 0, end: layout.moov.count, depth: 0, count: &count)
+        let bytes = Array(layout.moov)
+        let roots = try parse(bytes, start: 0, end: bytes.count, depth: 0, count: &count)
         guard roots.count == 1, roots[0].type == "moov", roots[0].children.contains(where: { $0.type == "trak" }) else { throw MediaError.invalidMedia }
+        if requirePlain { guard try readTracks(bytes, moov: roots[0], layout: layout).isEmpty else { throw MediaError.unsupported } }
     }
 
     static func decrypt(url: URL, spade: String, progress: @Sendable (String, Double) -> Void) throws {

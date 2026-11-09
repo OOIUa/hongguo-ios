@@ -1,5 +1,14 @@
 # iOS 验证记录
 
+## 0.1.19 / build 20：修复部分分集片源不可用
+
+日期：2026-11-09。对应 Android 0.7.21（Android issue #3：第二季第 5 集起无法播放）。
+
+- 原因：未加密的分集整体省略 `encrypt_info`（媒体为明文 hvc1，只带 `gear_des_key`），旧规则视为加密信息缺失而在所有请求路径失败；同一集不同路径 / 身份返回的模型也不一致。
+- `DramaAPI`：某条路径模型解析失败时继续下一条，全部失败才报告模型错误（优先于 HTTP / 空响应）；内联档位完全未声明加密且备用片源无法核对时按明文选用，明确声明加密却缺 `spade_a` 的仍拒绝。明文由 `MP4Processor` / `MediaPreparer` 检查索引不含 encv / enca / sinf / senc 后才播放。
+- `scripts/test-network.sh`、`test-media.sh`、`test-progressive.sh` 通过；实网读取《和离后我带女儿横扫魔域第二季》第 1–30 集全部成功，修复前第 14、18、22、25、28 集失败。
+- 未验证：无签名 IPA 未在真机安装。
+
 ## 0.1.18 / build 19：左右滑动调整进度
 
 日期：2026-11-08。对应 Android 0.7.20（Android issue #3 的建议）。
