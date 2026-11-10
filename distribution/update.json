@@ -1,18 +1,18 @@
 {
-  "version": "0.1.21",
-  "build": 22,
+  "version": "0.1.22",
+  "build": 23,
   "minimumOSVersion": "17.0",
   "releaseNotes": [
-    "桌面图标放大：红果标志约占图标高度的 2/3，与系统图标比例协调（issue #5）。",
-    "新增深色与着色图标：iOS 18 起在主屏幕「自定义」中选择深色或色调时，图标随之切换。",
-    "播放功能与 0.1.20 相同。"
+    "修复部分新剧（如《谁让这个文盲修仙的第六季》约一半分集）只提供 ByteVC2 编码而无法播放的问题：现在改取同一集的 H.265 片源（Android issue #3）。",
+    "详情页「相关作品」中的待上线作品显示预计上线日期（如「预计11月21日上线」），预约确认和最后一集播完的提示也会带上。",
+    "账号预约列表中待上线的剧显示预计上线日期，平台没有公布时显示「上线时间暂未公布」。"
   ],
-  "publishedAt": "2026-11-10T11:09:21Z",
-  "downloadURL": "https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.21/Hongguo-iOS-0.1.21-unsigned.ipa",
-  "sha256": "081820748def7e6eef6c2b8ffb62334e33332564782c2db0fcdbff9d69c75da1",
-  "size": 1780954,
+  "publishedAt": "2026-11-10T15:40:43Z",
+  "downloadURL": "https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.22/Hongguo-iOS-0.1.22-unsigned.ipa",
+  "sha256": "1b7b0c5598fb859ca65d3729dbf1ea09c94ff3b1ead3c3b644f71528e2bd9fef",
+  "size": 1792380,
   "mirrors": {
-    "gh-proxy": "https://gh-proxy.com/https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.21/Hongguo-iOS-0.1.21-unsigned.ipa",
-    "ghfast": "https://ghfast.top/https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.21/Hongguo-iOS-0.1.21-unsigned.ipa"
+    "gh-proxy": "https://gh-proxy.com/https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.22/Hongguo-iOS-0.1.22-unsigned.ipa",
+    "ghfast": "https://ghfast.top/https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.22/Hongguo-iOS-0.1.22-unsigned.ipa"
   }
 }
