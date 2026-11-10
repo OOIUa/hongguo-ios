@@ -4,7 +4,8 @@
 
 `Android/` 保留原始启动图标背景、前景和应用内 logo 的矢量 XML。`scripts/make-icon.swift` 使用相同坐标、颜色、贝塞尔曲线与偶奇填充规则，通过 Core Graphics 生成：
 
-- 1024 × 1024 的 iOS AppIcon，采用 Android 的 `#FFF9F6` 背景，无透明通道，外轮廓由 iOS 处理。
+- 1024 × 1024 的 iOS AppIcon，采用 Android 的 `#FFF9F6` 背景，无透明通道，外轮廓由 iOS 处理。Android 自适应图标 108dp 画布只露出中间约 72dp，iOS 若整张绘制标志会过小（issue #5），因此 iOS 只取以标志为中心的 80 单位视窗，标志高度约占图标 66%。
+- 同尺寸的深色（透明背景，由系统提供深色底）与着色（黑底白标，由系统按亮度着色）变体，iOS 18 起随主屏幕外观切换。
 - 透明的应用内 BrandLogo，采用 Android `ic_logo.xml` 的裁切范围。
 - 与 AppIcon 完全相同的全能签源图标。
 

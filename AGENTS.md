@@ -27,7 +27,7 @@
 
 - 源码在 `Sources/`，最低 iOS 17，依赖系统框架；用 `scripts/generate_project.py` 重新生成主 Xcode 工程。
 - 兼容 iPhone Duo（折叠屏，外屏 466×678pt、内屏 669×951pt）：必须用 iOS 27.1+ SDK（Xcode 27.1 及以上）构建，旧 SDK 构建的包在内屏会按普通 iPhone 尺寸加黑边显示。下限记在 `Release.json` 的 `minimumBuildSDK`，`build-unsigned.sh` 与 `verify-ipa.py` 会拦截；发布工作流使用 `xcode-27` runner。布局按宽度自适应，不要写死列数或屏幕尺寸。
-- 品牌图标已同步 Android 0.7.8 / `69c1d5a`。原始 XML 与来源在 `Branding/`，用 `xcrun swift scripts/make-icon.swift` 同时生成 AppIcon、应用内 BrandLogo 与 `distribution/icon.png`；不要恢复旧“果”字图标。业务移植基线仍以 README 为准。
+- 品牌图标已同步 Android 0.7.8 / `69c1d5a`。原始 XML 与来源在 `Branding/`，用 `xcrun swift scripts/make-icon.swift` 同时生成 AppIcon（浅色/深色/着色）、应用内 BrandLogo 与 `distribution/icon.png`；不要恢复旧“果”字图标。业务移植基线仍以 README 为准。
 - `build/`、`dist/`、个人数据和密钥不进 Git；IPA/哈希等二进制交付物上传 GitHub Releases。
 - 修改网络、媒体、账号、本机库或更新规则后，运行对应 `scripts/test-*.sh`。新增发布逻辑运行 `scripts/test-feeds.py`。
 - 实网测试须显式传 `--live`。没有用户账号实测的登录、云写入不能宣称已验证。
