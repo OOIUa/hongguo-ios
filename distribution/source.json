@@ -3,24 +3,24 @@
   "message": "项目维护者发布的未签名 IPA；需要自行签名安装。",
   "identifier": "ooiua.hongguo-ios.source",
   "sourceURL": "https://raw.githubusercontent.com/OOIUa/hongguo-ios/main/distribution/source.json",
-  "sourceicon": "https://raw.githubusercontent.com/OOIUa/hongguo-ios/v0.1.20/distribution/icon.png",
+  "sourceicon": "https://raw.githubusercontent.com/OOIUa/hongguo-ios/v0.1.21/distribution/icon.png",
   "apps": [
     {
       "name": "红果独立版",
       "type": "1",
       "bundleIdentifier": "com.ooiua.hongguo.ios",
-      "version": "0.1.20",
-      "build": 21,
+      "version": "0.1.21",
+      "build": 22,
       "minimumOSVersion": "17.0",
-      "versionDate": "2026-11-09T08:53:17Z",
-      "versionDescription": "移除左右两侧双击快进 / 快退：双击画面任意位置暂停或继续。\n调整进度只用长按后拖动：长按进入 2 倍速，再左右拖动，松手跳转；不长按直接左右滑动不会改进度。\n竖屏下清屏和长按 2 倍速时保留状态栏。0.1.19 起修复部分剧集无法播放。\n未签名 IPA，需使用本人的证书签名后安装。",
+      "versionDate": "2026-11-10T11:09:21Z",
+      "versionDescription": "桌面图标放大：红果标志约占图标高度的 2/3，与系统图标比例协调（issue #5）。\n新增深色与着色图标：iOS 18 起在主屏幕「自定义」中选择深色或色调时，图标随之切换。\n播放功能与 0.1.20 相同。\n未签名 IPA，需使用本人的证书签名后安装。",
       "lock": "0",
-      "downloadURL": "https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.20/Hongguo-iOS-0.1.20-unsigned.ipa",
+      "downloadURL": "https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.21/Hongguo-iOS-0.1.21-unsigned.ipa",
       "isLanZouCloud": "0",
-      "iconURL": "https://raw.githubusercontent.com/OOIUa/hongguo-ios/v0.1.20/distribution/icon.png",
+      "iconURL": "https://raw.githubusercontent.com/OOIUa/hongguo-ios/v0.1.21/distribution/icon.png",
       "tintColor": "E8463F",
-      "size": "1748410",
-      "sha256": "fc1f6f55a081fa23f90fca7807fadae1178ad23024a5c996f7b5b9d354b31ca2"
+      "size": "1780954",
+      "sha256": "081820748def7e6eef6c2b8ffb62334e33332564782c2db0fcdbff9d69c75da1"
     }
   ]
 }

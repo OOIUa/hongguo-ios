@@ -1,18 +1,18 @@
 {
-  "version": "0.1.20",
-  "build": 21,
+  "version": "0.1.21",
+  "build": 22,
   "minimumOSVersion": "17.0",
   "releaseNotes": [
-    "移除左右两侧双击快进 / 快退：双击画面任意位置暂停或继续。",
-    "调整进度只用长按后拖动：长按进入 2 倍速，再左右拖动，松手跳转；不长按直接左右滑动不会改进度。",
-    "竖屏下清屏和长按 2 倍速时保留状态栏。0.1.19 起修复部分剧集无法播放。"
+    "桌面图标放大：红果标志约占图标高度的 2/3，与系统图标比例协调（issue #5）。",
+    "新增深色与着色图标：iOS 18 起在主屏幕「自定义」中选择深色或色调时，图标随之切换。",
+    "播放功能与 0.1.20 相同。"
   ],
-  "publishedAt": "2026-11-09T08:53:17Z",
-  "downloadURL": "https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.20/Hongguo-iOS-0.1.20-unsigned.ipa",
-  "sha256": "fc1f6f55a081fa23f90fca7807fadae1178ad23024a5c996f7b5b9d354b31ca2",
-  "size": 1748410,
+  "publishedAt": "2026-11-10T11:09:21Z",
+  "downloadURL": "https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.21/Hongguo-iOS-0.1.21-unsigned.ipa",
+  "sha256": "081820748def7e6eef6c2b8ffb62334e33332564782c2db0fcdbff9d69c75da1",
+  "size": 1780954,
   "mirrors": {
-    "gh-proxy": "https://gh-proxy.com/https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.20/Hongguo-iOS-0.1.20-unsigned.ipa",
-    "ghfast": "https://ghfast.top/https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.20/Hongguo-iOS-0.1.20-unsigned.ipa"
+    "gh-proxy": "https://gh-proxy.com/https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.21/Hongguo-iOS-0.1.21-unsigned.ipa",
+    "ghfast": "https://ghfast.top/https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.21/Hongguo-iOS-0.1.21-unsigned.ipa"
   }
 }
