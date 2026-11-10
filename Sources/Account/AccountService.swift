@@ -10,6 +10,8 @@ struct CloudReservation: Identifiable, Codable {
     let drama: Drama
     let online: Bool
     let publishText: String
+    /// `schedule_publish_time` in milliseconds; absent in data saved before 0.1.22.
+    var publishAt: Int64?
 }
 
 struct AccountCredentials: Codable {
@@ -593,7 +595,8 @@ final class AccountService: ObservableObject {
                 item = Drama(id: "reservation:" + id, title: title, coverURL: ProtocolJSON.text(row["thumb_url"]), summary: ProtocolJSON.text(row["item_desc"]), episodeCount: 0)
             }
             guard let item, !item.title.isEmpty else { return nil }
-            return CloudReservation(drama: item, online: online, publishText: ProtocolJSON.text(row["expected_rec_text"]))
+            return CloudReservation(drama: item, online: online, publishText: ProtocolJSON.text(row["expected_rec_text"]),
+                                    publishAt: DramaAPI.publishMilliseconds(row["schedule_publish_time"]))
         }
     }
 

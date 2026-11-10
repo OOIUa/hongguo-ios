@@ -266,7 +266,8 @@ import JavaScriptCore
             _ = try await trackAPI.modelTrack(["video_list":[videoRow("bytevc2","https://v1.qznovelvod.com/a.mp4",1080)]])
             fatalError("A ByteVC2-only episode has no playable track")
         } catch { precondition(error.localizedDescription.contains("ByteVC2")) }
-        // All-ByteVC2 episodes read the fallback, then once more with codec_type=0&force_codec=h264 (hongguoTV 0.1.20).
+        // All-ByteVC2 episodes read the fallback, then codec_type=1 (h265, 2026-11-10 issue #3), then the older
+        // codec_type=0&force_codec=h264 (hongguoTV 0.1.20).
         final class Reads: @unchecked Sendable { var urls = [String]() }
         @Sendable func codecReply(_ codec: String, id: String = "v0vc2", duration: Double = 60) -> [String: Any] {
             ["video_info":["data":["video_id":id,"video_duration":duration,"video_list":["video_1":videoRow(codec,"https://v1.qznovelvod.com/\(codec).mp4",720)]]]]
@@ -275,22 +276,50 @@ import JavaScriptCore
                                        "fallback_api":"https://vod.snssdk.com/video/fallback?sig=a%2Bb&codec_type=3"]
         let reads = Reads()
         let swapped = try await trackAPI.modelTrack(vc2Model) { url in
-            reads.urls.append(url); return codecReply(url.contains("force_codec") ? "hevc" : "bvc2")
+            reads.urls.append(url); return codecReply(url.hasSuffix("&codec_type=1") ? "h265" : "bvc2")
         }
-        precondition(swapped.url.absoluteString == "https://v1.qznovelvod.com/hevc.mp4" && reads.urls.count == 2)
+        precondition(swapped.url.absoluteString == "https://v1.qznovelvod.com/h265.mp4" && reads.urls.count == 2, reads.urls.description)
         precondition(reads.urls[0] == "https://vod.snssdk.com/video/fallback?sig=a%2Bb&codec_type=3")
-        precondition(reads.urls[1] == "https://vod.snssdk.com/video/fallback?sig=a%2Bb&codec_type=0&force_codec=h264", reads.urls[1])
+        precondition(reads.urls[1] == "https://vod.snssdk.com/video/fallback?sig=a%2Bb&codec_type=1", reads.urls[1])
+        let older = Reads()
+        let legacy = try await trackAPI.modelTrack(vc2Model) { url in
+            older.urls.append(url); return codecReply(url.contains("force_codec") ? "hevc" : "bytevc2")
+        }
+        precondition(legacy.url.absoluteString == "https://v1.qznovelvod.com/hevc.mp4" && older.urls.count == 3, older.urls.description)
+        precondition(older.urls[2] == "https://vod.snssdk.com/video/fallback?sig=a%2Bb&codec_type=0&force_codec=h264", older.urls[2])
+        // A failed first compatibility read still moves on to the next parameters.
+        let afterFailure = try await trackAPI.modelTrack(vc2Model) { url in
+            if url.hasSuffix("&codec_type=1") { throw URLError(.networkConnectionLost) }
+            return codecReply(url.contains("force_codec") ? "h264" : "bytevc2")
+        }
+        precondition(afterFailure.url.absoluteString == "https://v1.qznovelvod.com/h264.mp4")
         let bareModel: [String: Any] = ["fallback_api":"https://vod.snssdk.com/video/fallback"]
-        let bare = try await trackAPI.modelTrack(bareModel) { url in codecReply(url.contains("force_codec") ? "h264" : "bytevc2") }
-        precondition(bare.url.absoluteString == "https://v1.qznovelvod.com/h264.mp4")
+        let bare = try await trackAPI.modelTrack(bareModel) { url in codecReply(url.hasSuffix("?codec_type=1") ? "h265" : "bytevc2") }
+        precondition(bare.url.absoluteString == "https://v1.qznovelvod.com/h265.mp4")
         for compat in [codecReply("bytevc2"), codecReply("hevc", id: "v0other"), codecReply("hevc", duration: 30)] {
-            let refused = try? await trackAPI.modelTrack(vc2Model) { url in url.contains("force_codec") ? compat : codecReply("bytevc2") }
+            let refused = try? await trackAPI.modelTrack(vc2Model) { url in url.hasSuffix("&codec_type=3") ? codecReply("bytevc2") : compat }
             precondition(refused == nil, "A compatibility answer that is still ByteVC2 or names another video must not play")
         }
         do {
             _ = try await trackAPI.modelTrack(vc2Model) { _ in codecReply("bytevc2") }
             fatalError("A compatibility answer that stays ByteVC2 must be reported")
         } catch { precondition(error.localizedDescription.contains("ByteVC2")) }
+        // Upcoming works: the search reservation card with the same id gives the official text and a time in seconds.
+        let releaseSearch = try ProtocolJSON.object(Data(#"{"search_tabs":[{"data":[{"video_data":[{}]},{"subscribe_items":[{"item_id_str":"7704905932207049999","sub_info":"预计12月1日上线","schedule_publish_time":1796054400},{"item_id":7704905932207049752,"item_id_str":"7704905932207049752","sub_info":" 预计11月21日上线 ","schedule_publish_time":1795190400}]}]}]}"#.utf8))
+        let release = DramaAPI.upcomingRelease(releaseSearch, id: "7704905932207049752")
+        precondition(release?.text == "预计11月21日上线" && release?.publishAtMs == 1_795_190_400_000, String(describing: release))
+        precondition(DramaAPI.upcomingRelease(releaseSearch, id: "7704905932207040000") == nil, "Only the card with the same id counts")
+        let timeOnly = try ProtocolJSON.object(Data(#"{"search_tabs":[{"data":[{"subscribe_items":[{"item_id":7704905932207049752,"schedule_publish_time":1795190400000}]}]}]}"#.utf8))
+        precondition(DramaAPI.upcomingRelease(timeOnly, id: "7704905932207049752").map { $0.text.isEmpty && $0.publishAtMs == 1_795_190_400_000 } == true)
+        let bareCard = try ProtocolJSON.object(Data(#"{"search_tabs":[{"data":[{"subscribe_items":[{"item_id":7704905932207049752}]}]}]}"#.utf8))
+        precondition(DramaAPI.upcomingRelease(bareCard, id: "7704905932207049752") == nil)
+        let releaseNow = Date(timeIntervalSince1970: 1_794_300_000) // 2026-11-10 Beijing
+        precondition(releaseLabel(" 预计11月21日上线 ", publishAtMs: 0, now: releaseNow) == "预计11月21日上线")
+        precondition(releaseLabel("", publishAtMs: 1_795_190_400_000, now: releaseNow) == "预计11月21日上线")
+        precondition(releaseLabel("", publishAtMs: 1_798_819_200_000, now: releaseNow) == "预计2027年1月2日上线")
+        precondition(releaseLabel("  ", publishAtMs: 0, now: releaseNow).isEmpty)
+        precondition(DramaAPI.publishMilliseconds(1_795_190_400) == 1_795_190_400_000 && DramaAPI.publishMilliseconds("1795190400000") == 1_795_190_400_000
+                     && DramaAPI.publishMilliseconds(nil) == 0)
         let incompleteModel: [String: Any] = ["video_list":[videoRow("h264","https://v1.qznovelvod.com/nokey.mp4",1080)],"video_id":"v0abc","video_duration":60.0,"fallback_api":"https://vod.snssdk.com/video/fallback"]
         let spadeSample = "k7wd8lO6G/dhixnESLgG9k2BCvxFtxX+Xrkl8my/EvVBugmCgg=="
         @Sendable func fallbackReply(_ id: String, _ duration: Double, _ side: Int) -> [String: Any] {

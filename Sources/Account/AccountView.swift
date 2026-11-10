@@ -161,10 +161,15 @@ struct AccountPosterLists: View {
                 else { posterGrid(account.likes.map { ($0, nil, nil, true) }) }
             } else {
                 if account.reservations.isEmpty { empty("暂无已读取的账户预约") }
-                else { posterGrid(account.reservations.map { ($0.drama, $0.online ? "已上线" : ($0.publishText.isEmpty ? "待上线" : $0.publishText), nil, $0.online) }) }
+                else { posterGrid(account.reservations.map { ($0.drama, $0.online ? "已上线" : reservationLabel($0), nil, $0.online) }) }
             }
         }
         .navigationDestination(item: $opening) { DetailView(drama: $0.drama, resume: $0.resume) }
+    }
+    /// An upcoming reservation: the platform text, else its publish date, else that none is announced yet.
+    private func reservationLabel(_ reservation: CloudReservation) -> String {
+        let label = releaseLabel(reservation.publishText, publishAtMs: reservation.publishAt ?? 0)
+        return label.isEmpty ? "上线时间暂未公布" : label
     }
     private func empty(_ text: String) -> some View { Text(text).foregroundStyle(model.appearance.muted).frame(maxWidth: .infinity).padding(.vertical, 24) }
     /// A reservation not yet on line has nothing to open.

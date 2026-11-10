@@ -59,11 +59,19 @@ struct DetailView: View {
             }
             .task(id: drama.id) { await load() }
             // Secondary content: a failure leaves the section out without affecting the drama itself.
-            .task(id: drama.id) { related = (try? await DramaAPI.shared.related(id: drama.id)) ?? [] }
+            .task(id: drama.id) {
+                related = (try? await DramaAPI.shared.related(id: drama.id)) ?? []
+                // The related plan carries no release date; look up the few upcoming works one by one.
+                for work in related.filter(\.upcoming).prefix(3) {
+                    guard let text = try? await DramaAPI.shared.upcomingRelease(id: work.id, title: work.drama.title), !text.isEmpty,
+                          !Task.isCancelled, let index = related.firstIndex(where: { $0.id == work.id }) else { continue }
+                    related[index].releaseText = text
+                }
+            }
             .alert("预约这部作品？", isPresented: Binding(get: { reserving != nil }, set: { if !$0 { reserving = nil } }), presenting: reserving) { work in
                 Button("预约") { Task { await account.reserve(work) } }
                 Button("取消", role: .cancel) { }
-            } message: { work in Text("将在红果账号中预约《\(work.drama.title)》，上线后可在账号的预约列表查看。") }
+            } message: { work in Text("将在红果账号中预约《\(work.drama.title)》\(work.releaseText.isEmpty ? "" : "（\(work.releaseText)）")，上线后可在账号的预约列表查看。") }
     }
 
     /// The two favorites side by side, so where each one is kept is visible: this device or the Hongguo account.
@@ -119,7 +127,10 @@ struct DetailView: View {
             PosterView(drama: work.drama).frame(width: 96)
             Text(work.season.isEmpty ? "相关" : work.season).font(.caption).foregroundStyle(model.appearance.accent).lineLimit(1)
             Text(work.drama.title).font(.footnote).foregroundStyle(model.appearance.ink).lineLimit(2).multilineTextAlignment(.leading)
-            if work.upcoming { reserveButton(work) }
+            if work.upcoming {
+                Text(work.releaseText.isEmpty ? "待上线" : work.releaseText).font(.caption).foregroundStyle(model.appearance.muted).lineLimit(1)
+                reserveButton(work)
+            }
             else { Text("全 \(work.drama.episodeCount) 集").font(.caption).foregroundStyle(model.appearance.muted).lineLimit(1) }
         }.frame(width: 96, alignment: .topLeading)
     }

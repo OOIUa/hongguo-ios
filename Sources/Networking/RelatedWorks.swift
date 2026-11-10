@@ -10,6 +10,22 @@ struct RelatedWork: Identifiable, Sendable {
     let season: String
     let upcoming: Bool
     let seasonNumber: Int
+    /// Expected release of an upcoming work, such as 预计11月21日上线; empty until known.
+    var releaseText = ""
+}
+
+/// The expected release of an upcoming work, as the official app words it ("预计11月21日上线"). The platform's own text
+/// wins; otherwise `publishAtMs` is formatted in Beijing time, with the year only when it differs from `now`'s.
+/// Empty when neither is known.
+func releaseLabel(_ text: String, publishAtMs: Int64, now: Date = Date()) -> String {
+    let clean = String(text.split(whereSeparator: \.isWhitespace).joined(separator: " ").prefix(40))
+    if !clean.isEmpty { return clean }
+    guard publishAtMs > 0 else { return "" }
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(identifier: "Asia/Shanghai")!
+    let at = calendar.dateComponents([.year, .month, .day], from: Date(timeIntervalSince1970: Double(publishAtMs) / 1000))
+    let year = at.year != calendar.component(.year, from: now) ? "\(at.year ?? 0)年" : ""
+    return "预计\(year)\(at.month ?? 0)月\(at.day ?? 0)日上线"
 }
 
 /// The 相关作品 cell of the reading plan. Anonymous, signed and read-only.

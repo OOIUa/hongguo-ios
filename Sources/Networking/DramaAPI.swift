@@ -22,6 +22,7 @@ actor DramaAPI {
     private(set) var lastPlaybackTrace = ""
     private var registrationFailedAt: Date?
     private var relatedCache: [String: [RelatedWork]] = [:]
+    private var releaseCache: [String: String] = [:]
     private let suggestionWebID = UUID().uuidString.lowercased()
     private var filterCache: [String: [FilterGroup]] = [:]
 
@@ -98,6 +99,44 @@ actor DramaAPI {
         }
         if !groups.isEmpty { filterCache[genre] = groups }
         return groups
+    }
+
+    /// The expected release of an upcoming work. The related plan only says 预告 and how many reserved; searching the full
+    /// title answers a reservation card (`subscribe_items`) with the official `sub_info` (such as 预计11月21日上线) and a
+    /// `schedule_publish_time` in seconds (observed 2026-11-10, Android issue #3). Only a card with the same id counts.
+    func upcomingRelease(id: String, title: String) async throws -> String {
+        let query = String(title.trimmingCharacters(in: .whitespacesAndNewlines).prefix(200))
+        guard ProtocolJSON.identifier(id) != nil, !query.isEmpty else { return "" }
+        if let cached = releaseCache[id] { return cached }
+        let response = try await api(path: "/reading/bookapi/search/tab/v", extra: [["query",query],["tab_name","feed"],["search_source","1"],
+            ["offset","0"],["count","10"],["use_correct","true"]])
+        guard let release = Self.upcomingRelease(response, id: id) else { return "" }
+        let label = releaseLabel(release.text, publishAtMs: release.publishAtMs)
+        if !label.isEmpty { releaseCache[id] = label }
+        return label
+    }
+
+    /// The reservation card with id `id` in a search response: its official text and its time in milliseconds (0 if absent).
+    static func upcomingRelease(_ response: [String: Any], id: String) -> (text: String, publishAtMs: Int64)? {
+        for tab in ProtocolJSON.array(response["search_tabs"]) {
+            for cell in ProtocolJSON.array(ProtocolJSON.dictionary(tab)["data"]) {
+                for value in ProtocolJSON.array(ProtocolJSON.dictionary(cell)["subscribe_items"]) {
+                    let row = ProtocolJSON.dictionary(value)
+                    let itemID = ProtocolJSON.text(row["item_id_str"]).isEmpty ? ProtocolJSON.text(row["item_id"]) : ProtocolJSON.text(row["item_id_str"])
+                    guard itemID.trimmingCharacters(in: .whitespaces) == id else { continue }
+                    let text = String(ProtocolJSON.text(row["sub_info"]).split(whereSeparator: \.isWhitespace).joined(separator: " ").prefix(40))
+                    let stamp = publishMilliseconds(row["schedule_publish_time"])
+                    return text.isEmpty && stamp == 0 ? nil : (text, stamp)
+                }
+            }
+        }
+        return nil
+    }
+
+    /// A platform publish time given in seconds or milliseconds, as milliseconds; 0 when absent.
+    static func publishMilliseconds(_ value: Any?) -> Int64 {
+        let raw = max(0, Int64(ProtocolJSON.text(value)) ?? Int64(ProtocolJSON.integer(value)))
+        return raw > 0 && raw <= 9_999_999_999 ? raw * 1000 : raw
     }
 
     func search(query: String, offset: Int) async throws -> DramaPage {
@@ -263,25 +302,42 @@ actor DramaAPI {
 
     private func checkedFallback(_ address: String) throws -> URL { try checkedURL(address, domains: ["fqnovel.com","snssdk.com"]) }
 
-    /// Selects from a fallback model. When every row is ByteVC2, reads the same address once more with the official
-    /// player's compatibility parameters, which served HEVC for such episodes (hongguoTV 0.1.20, issue #56, `265472f`).
-    /// The parameter names do not guarantee a codec, so the answer is still filtered by its actual codec.
+    /// Codec parameters for the fallback address, tried in order. 2026-11-10 (Android issue #3, 《谁让这个文盲修仙的第六季》
+    /// episode 58): the original address carries `codec_type=4` and every row is ByteVC2; `codec_type=1` answers h265 for
+    /// every quality while the older `codec_type=0&force_codec=h264` still answers ByteVC2. The older pair stays second for
+    /// episodes it used to serve HEVC for (hongguoTV 0.1.20, issue #56, `265472f`).
+    static let compatibleCodecQueries: [[URLQueryItem]] = [
+        [URLQueryItem(name: "codec_type", value: "1")],
+        [URLQueryItem(name: "codec_type", value: "0"), URLQueryItem(name: "force_codec", value: "h264")],
+    ]
+
+    /// Selects from a fallback model. When every row is ByteVC2, reads the same address again with each compatibility
+    /// codec parameter in turn. The parameter names do not guarantee a codec, so each answer is still filtered by its
+    /// actual codec and must name the same video and full duration.
     private func fallbackTrack(_ info: [String: Any], address: String, read: @Sendable (String) async throws -> [String: Any]) async throws -> VideoTrack {
         do {
             return try selectTrack(info, requireEncryption: false, minimumPixels: 0)
         } catch let onlyByteVC2 as ByteVC2Only {
-            guard let compatible = compatibleFallback(address) else { throw onlyByteVC2 }
-            let other = try fallbackInfo(try await read(compatible))
-            try Self.confirmSameVideo(info, other)
-            return try selectTrack(other, requireEncryption: false, minimumPixels: 0)
+            for query in Self.compatibleCodecQueries {
+                guard let compatible = compatibleFallback(address, codec: query) else { break }
+                do {
+                    let other = try fallbackInfo(try await read(compatible))
+                    try Self.confirmSameVideo(info, other)
+                    return try selectTrack(other, requireEncryption: false, minimumPixels: 0)
+                } catch is CancellationError { throw CancellationError()
+                } catch {
+                    try Task.checkCancellation()
+                }
+            }
+            throw onlyByteVC2
         }
     }
 
-    func compatibleFallback(_ address: String) -> String? {
+    func compatibleFallback(_ address: String, codec: [URLQueryItem] = DramaAPI.compatibleCodecQueries[0]) -> String? {
         // Keep the other parameters byte-for-byte: decoding and re-encoding could turn a signed "%2B" into "+".
         guard var parts = URLComponents(string: cleanURL(address)) else { return nil }
         var items = (parts.percentEncodedQueryItems ?? []).filter { $0.name != "codec_type" && $0.name != "force_codec" }
-        items += [URLQueryItem(name: "codec_type", value: "0"), URLQueryItem(name: "force_codec", value: "h264")]
+        items += codec
         parts.percentEncodedQueryItems = items
         return parts.string
     }
@@ -328,7 +384,7 @@ actor DramaAPI {
             let pixels = shortSide > 0 ? shortSide : Int(quality.filter(\.isNumber)) ?? 0
             return (item,rank,pixels,shortSide,quality)
         }.sorted { $0.rank == $1.rank ? $0.pixels > $1.pixels : $0.rank < $1.rank }
-        // Only the fallback compatibility request has been seen to change the codec (see fallbackTrack).
+        // Only the fallback compatibility requests have been seen to change the codec (see fallbackTrack).
         if compatible.isEmpty, items.contains(where: { ["bytevc2","bvc2"].contains(firstText($0["codec_type"],ProtocolJSON.dictionary($0["video_meta"])["codec_type"]).lowercased()) }) {
             throw ByteVC2Only()
         }

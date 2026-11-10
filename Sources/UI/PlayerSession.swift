@@ -218,7 +218,11 @@ final class PlayerSession: ObservableObject {
     /// After the last episode, continues with the next season when it is on line and autoplay is on.
     private func advanceSeason() async {
         guard let works = try? await DramaAPI.shared.related(id: detail.drama.id), let next = RelatedWorks.nextSeason(works), !stopped, finished else { return }
-        if next.upcoming { endMessage = "已播完最后一集，\(next.season)待上线，可在详情页预约" }
+        if next.upcoming {
+            let release = (try? await DramaAPI.shared.upcomingRelease(id: next.id, title: next.drama.title)) ?? ""
+            guard !stopped, finished else { return }
+            endMessage = "已播完最后一集，\(next.season)\(release.isEmpty ? "待上线" : release)，可在详情页预约"
+        }
         else if app.autoNext { app.play(next.drama) }
         else { endMessage = "已播完最后一集，\(next.season)可在详情页观看" }
     }
