@@ -248,6 +248,7 @@ actor DramaAPI {
         let body = try ProtocolJSON.data(["biz_param":biz,"mixed_video_id_map":["1004":[episodeID]]])
         return try await playbackTrack(
             identity: { [self] in try await freshPlaybackIdentity() },
+            single: { [self] identity in try await readSinglePlayback(episodeID: episodeID, identity: identity) },
             read: { [self] route, identity in try await readPlaybackRoute(route, episodeID: episodeID, body: body, identity: identity) },
             use: { [self] model in
                 guard !model.isEmpty else { throw HGError.message("服务暂未返回当前分集片源") }
@@ -261,7 +262,8 @@ actor DramaAPI {
     func modelTrack(_ model: [String: Any], readFallback: (@Sendable (String) async throws -> [String: Any])? = nil) async throws -> VideoTrack {
         let read: @Sendable (String) async throws -> [String: Any] = readFallback ?? { [self] in try await request(url: try await checkedFallback($0), body: nil, headers: ["User-Agent":PlaybackRegistration.userAgent]) }
         let address = fallbackURL(model["fallback_api"])
-        guard !(model["video_list"] as? [Any] ?? []).isEmpty else {
+        let inlineRows = (model["video_list"] as? [Any])?.count ?? (model["video_list"] as? [String: Any])?.count ?? 0
+        guard inlineRows > 0 else {
             return try await fallbackTrack(try fallbackInfo(try await read(address)), address: address, read: read)
         }
         do {
@@ -437,8 +439,11 @@ actor DramaAPI {
     /// Identities and routes do not always answer with the same model (2026-11-09: GET sometimes gave only keyless inline
     /// rows for an episode whose POST gave a full 1080P), so a model that yields no track moves on to the next route too.
     /// Only after every route fails is the model error reported, ahead of HTTP or empty-response errors.
+    /// Since 2026-11-11 every multi-episode route answers 0 bytes, so the fully signed single-episode endpoint
+    /// (`single`) goes first with the same identity; the old routes follow in their usual order when it fails.
     func playbackTrack(routes: [PlaybackRoute] = DramaAPI.playbackRoutes, budget: TimeInterval = 20,
                        identity newIdentity: @Sendable () async throws -> RegisteredIdentity,
+                       single: (@Sendable (RegisteredIdentity) async throws -> PlaybackRead)? = nil,
                        read: @Sendable (PlaybackRoute, RegisteredIdentity) async throws -> PlaybackRead,
                        use: @Sendable ([String: Any]) async throws -> VideoTrack) async throws -> VideoTrack {
         var identity = try await newIdentity()
@@ -447,6 +452,30 @@ actor DramaAPI {
         var onlyEmpty = true
         let started = Date()
         defer { lastPlaybackTrace = trace.joined(separator: " ") }
+        if let single {
+            var model: [String: Any]?
+            do {
+                switch try await single(identity) {
+                case .empty: trace.append("S=0B")
+                case .invalid: trace.append("S=invalid"); onlyEmpty = false
+                case .model(let value): model = value
+                }
+            } catch is CancellationError { throw CancellationError()
+            } catch { trace.append("S=failed"); onlyEmpty = false; failure = error }
+            if let model {
+                onlyEmpty = false
+                do {
+                    let track = try await use(model)
+                    trace.append("S=ok")
+                    return track
+                } catch is CancellationError { throw CancellationError()
+                } catch {
+                    try Task.checkCancellation()
+                    trace.append("S=unusable")
+                    modelFailure = error
+                }
+            }
+        }
         for route in routes {
             guard Date().timeIntervalSince(started) < budget else { break }
             try Task.checkCancellation()
@@ -493,6 +522,62 @@ actor DramaAPI {
         guard let response = try? ProtocolJSON.object(data) else { return .invalid }
         guard ProtocolJSON.integer(response["code"] ?? response["Code"]) == 0 else { throw HGError.message(Self.rejectedPlayback) }
         return .model(ProtocolJSON.dictionary(ProtocolJSON.dictionary(ProtocolJSON.dictionary(response["data"])[episodeID])["video_model"]))
+    }
+
+    // MARK: Single-episode endpoint (2026-11-11)
+    // Synchronized from LiuWQ0809/hongguo-android commits 675f895, 10bda56 and 1765bfa (2026-11-11, GPL-3.0-only).
+
+    static let singleVideoPath = "/novel/player/video_model/v1/"
+    static let singleUserAgent = "com.phoenix.read/73532 (Linux; U; Android 16; zh_CN; 25053RT47C; Build/BP2A.250605.031.A3; "
+        + "Cronet/TTNetVersion:04657795 2026-01-23 QuicVersion:c67e9834 2025-09-08)"
+
+    private func readSinglePlayback(episodeID: String, identity: RegisteredIdentity) async throws -> PlaybackRead {
+        let body = try Self.singleBody(episodeID: episodeID)
+        let now = Int64(Date().timeIntervalSince1970 * 1000)
+        let query = Self.singleQuery(identity, nowMs: now)
+        guard let url = URL(string: "https://\(Self.playbackHost)\(Self.singleVideoPath)?\(query)") else { throw HGError.message("播放地址无效") }
+        var headers = ["User-Agent":Self.singleUserAgent, "Accept":"application/json", "Content-Type":"application/json; charset=utf-8",
+                       "x-xs-from-web":"0", "sdk-version":"2"]
+        headers.merge(try PlayerSign.headers(query: query, body: body, nowMs: now, deviceID: identity.deviceID)) { $1 }
+        let data = try await fetch(url: url, body: body, headers: headers, timeout: 8)
+        guard !data.isEmpty else { return .empty }
+        return Self.singleVideoModel(data).map { .model($0) } ?? .invalid
+    }
+
+    static func singleBody(episodeID: String) throws -> Data {
+        try ProtocolJSON.data(["video_id":episodeID, "content_type":1, "biz_param":["need_all_video_definition":true, "video_platform":3]])
+    }
+
+    /// The 7.3.5.32 player profile with keys sorted; the signature covers exactly this query string.
+    static func singleQuery(_ identity: RegisteredIdentity, nowMs: Int64) -> String {
+        var q = PlaybackRegistration.deviceProfile
+        for name in ["host_abi", "dragon_device_type", "pv_player", "compliance_status", "need_personal_recommend", "player_so_load", "is_android_pad_screen"] {
+            q.removeValue(forKey: name)
+        }
+        for name in ["version_code", "manifest_version_code", "update_version_code"] { q[name] = "73532" }
+        q["version_name"] = "7.3.5.32"
+        q["device_id"] = identity.deviceID; q["iid"] = identity.installID; q["_rticket"] = String(nowMs)
+        return q.keys.sorted().map { "\(formEncode($0))=\(formEncode(q[$0]!))" }.joined(separator: "&")
+    }
+
+    /// Java URLEncoder plus the %20 / !'()~ rewrites the Android client applies, so both send the same bytes.
+    private static func formEncode(_ value: String) -> String {
+        var allowed = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
+        allowed.insert(charactersIn: ".-*_!'()~")
+        return value.addingPercentEncoding(withAllowedCharacters: allowed) ?? value
+    }
+
+    /// `data.video_model` as an object, a JSON string or Base64 JSON, when `code` is 0; else nil.
+    static func singleVideoModel(_ data: Data) -> [String: Any]? {
+        guard let root = try? ProtocolJSON.object(data), ProtocolJSON.integer(root["code"] ?? root["Code"] ?? -1) == 0 else { return nil }
+        var raw = ProtocolJSON.dictionary(root["data"])["video_model"]
+        if let text = raw as? String {
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            let json = trimmed.hasPrefix("{") ? Data(trimmed.utf8) : Data(base64Encoded: trimmed)
+            raw = json.flatMap { try? ProtocolJSON.object($0) }
+        }
+        let model = ProtocolJSON.dictionary(raw)
+        return model.isEmpty ? nil : model
     }
 
     struct PlaybackRoute: Sendable, Equatable { let post: Bool; let host: String; let renewsIdentity: Bool }

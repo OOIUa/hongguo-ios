@@ -169,7 +169,7 @@ struct PlayerScreen: View {
     }
 
     private func seekDragCancelled() {
-        if seekDragStart == nil { seekDragAbandoned = false }
+        if seekDragStart == nil, seekDragAbandoned { seekDragAbandoned = false }
         guard let start = seekDragStart else { return }
         seekDragStart = nil
         session.endDragSeek(from: start, commit: false)
@@ -411,7 +411,9 @@ private struct VideoGestureView: UIViewRepresentable {
         context.coordinator.parent = self
         uiView.gestureRecognizers?.forEach { if $0.isEnabled != enabled { $0.isEnabled = enabled } }
     }
-    static func dismantleUIView(_ uiView: UIView, coordinator: Coordinator) { coordinator.parent.holdEnded(); coordinator.parent.dragCancelled(); coordinator.parent.seekCancelled() }
+    /// Only the session is told: this runs while SwiftUI tears the player screen down, and writing the screen's
+    /// `@State` from here aborts on iOS 18 as an exclusive-access conflict (issue #6). The session's stop covers the rest.
+    static func dismantleUIView(_ uiView: UIView, coordinator: Coordinator) { coordinator.parent.holdEnded() }
     @MainActor final class Coordinator: NSObject, UIGestureRecognizerDelegate {
         var parent: VideoGestureView
         private var pinchDecided = false

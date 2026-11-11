@@ -385,6 +385,54 @@ import JavaScriptCore
             precondition(!(error is URLError))
         }
         precondition(allCalls.routes == DramaAPI.playbackRoutes && allCalls.identities == 2)
+        // Single-episode endpoint (2026-11-11): signatures match the GPL reference byte for byte (LiuWQ0809/hongguo-android e73ed41).
+        let signQuery = "aid=8662&device_id=123456789", signBody = Data("{\"video_id\":\"123\"}".utf8), signNonce = Data((0...10).map { UInt8($0) })
+        precondition(PlayerSign.gorgon(query: signQuery, body: signBody, timestamp: 1700000000) == "8404401c0000f27a76e6957ca1b97022103fad22c9d970977ebb")
+        precondition(PlayerSign.ladon(timestamp: 1700000000, prefix: signNonce.subdata(in: 2..<6)) == "AgMEBVbVr6bCGXEl3RbL1aAkpFHJpdxRfjTl94yWLoz6K/SQ")
+        let signArgus = try PlayerSign.argus(query: signQuery, body: signBody, timestamp: 1700000000, deviceID: "123456789", nonce: signNonce)
+        precondition(signArgus == "PMw3qMRaFflguIKYlC2mdpV2IWcBCwn1Koj5IoaLq5b3ZXfATS3iituUmnt2HJFxDCWIpwc/xgRjqtkv5n4uLADEdr1fboupPgZ/Kabe2EMEaQ3/o7oMc8hY3WR/n/piCdIOxKzo9jPh8pSH+K+pvGX42LJEU1ciK+i5QxX7TOyhmIHS+K9t673Uc5uPBA18ECoTk5nn361Gl9LORhAI2E5sgtZNeEdG0ZiGxg8C5aL1iFWeyfmPcEQPxdTh/1DX2LE5dW23fo7nBJN4BnwtNwMYQKz+Lx6nN1D5KGt2wQ9f+w==")
+        precondition(Data(SM3.hash(Array("abc".utf8))).hexString == "66c7f0f462eeedd9d1f2d46bdc10e4e24167c4875cf2f7a2297da02b8f4ba8e0")
+        let signHeaders = try PlayerSign.headers(query: "a=1", body: Data("{}".utf8), nowMs: 1700000000123, deviceID: "42")
+        precondition(signHeaders["x-khronos"] == "1700000000" && signHeaders["x-ss-req-ticket"] == "1700000000123" && signHeaders["x-ss-stub"]?.count == 32)
+        precondition((try? PlayerSign.headers(query: "a=1", body: Data(), nowMs: 0, deviceID: "abc")) == nil)
+        let singleQuery = DramaAPI.singleQuery(routeIdentity, nowMs: 1700000000123)
+        precondition(singleQuery.hasPrefix("_rticket=1700000000123&ac=wifi&aid=8662&"), singleQuery)
+        precondition(singleQuery.contains("&device_id=7777777777777777&") && singleQuery.contains("&iid=8888888888888888&")
+            && singleQuery.contains("&resolution=1280*2772&") && singleQuery.hasSuffix("&version_code=73532&version_name=7.3.5.32"))
+        precondition(!singleQuery.contains("pv_player") && !singleQuery.contains("cdid") && !singleQuery.contains("host_abi"))
+        let singleModelJSON = "{\"video_id\":\"v1\",\"video_list\":[]}"
+        for value in [try ProtocolJSON.object(Data(singleModelJSON.utf8)), singleModelJSON, Data(singleModelJSON.utf8).base64EncodedString()] as [Any] {
+            let reply = try ProtocolJSON.data(["code":0, "data":["video_model":value]])
+            precondition(DramaAPI.singleVideoModel(reply)?["video_id"] as? String == "v1")
+        }
+        precondition(DramaAPI.singleVideoModel(Data("{\"code\":0,\"data\":{}}".utf8)) == nil)
+        precondition(DramaAPI.singleVideoModel(Data("{\"code\":100103,\"data\":{\"video_model\":{\"a\":1}}}".utf8)) == nil)
+        // An inline video_list may also be an object map.
+        let mapModel: [String: Any] = ["video_list":["video_1":videoRow("h264","https://v1.qznovelvod.com/map.mp4",1080).merging(["spade_a":spadeSample]) { $1 }]]
+        let mapTrack = try await trackAPI.modelTrack(mapModel)
+        precondition(mapTrack.url.absoluteString == "https://v1.qznovelvod.com/map.mp4")
+        // The single endpoint goes first with the route identity; a usable model ends the fetch without old routes.
+        let singleCalls = RouteCalls()
+        let singleTrack = try await trackAPI.playbackTrack(identity: { singleCalls.identities += 1; return routeIdentity },
+            single: { identity in precondition(identity.deviceID == routeIdentity.deviceID); return .model(keyedModel) },
+            read: { route, _ in singleCalls.routes.append(route); return .empty }, use: { try await trackAPI.modelTrack($0) })
+        precondition(singleTrack.url.absoluteString == "https://v1.qznovelvod.com/keyed.mp4" && singleCalls.routes.isEmpty && singleCalls.identities == 1)
+        let singleTrace = await trackAPI.lastPlaybackTrace
+        precondition(singleTrace == "S=ok", singleTrace)
+        // An empty single answer falls through to the old routes in their usual order.
+        let fallCalls = RouteCalls()
+        let fellBack = try await trackAPI.playbackTrack(identity: { routeIdentity }, single: { _ in .empty },
+            read: { route, _ in fallCalls.routes.append(route); return .model(route.post ? keyedModel : keylessModel) },
+            use: { try await trackAPI.modelTrack($0) })
+        precondition(fellBack.url.absoluteString == "https://v1.qznovelvod.com/keyed.mp4" && fallCalls.routes == Array(DramaAPI.playbackRoutes.prefix(2)))
+        let fallTrace = await trackAPI.lastPlaybackTrace
+        precondition(fallTrace == "S=0B G:b=unusable P:b=ok", fallTrace)
+        // A single model that yields no track is reported ahead of empty old routes.
+        do {
+            _ = try await trackAPI.playbackTrack(identity: { routeIdentity }, single: { _ in .model(keylessModel) },
+                read: { _, _ in .empty }, use: { try await trackAPI.modelTrack($0) })
+            fatalError("Keyless single model with empty routes must not play")
+        } catch { precondition(error.localizedDescription == "当前分集的播放地址或解密信息暂时不可用", error.localizedDescription) }
         // Without any model the earlier errors keep their meaning.
         do {
             _ = try await trackAPI.playbackTrack(identity: { routeIdentity }, read: { _, _ in .empty }, use: { _ in fatalError("No model") })

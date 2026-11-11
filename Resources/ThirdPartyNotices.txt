@@ -62,3 +62,12 @@ ByteVC2 compatibility request (2026-11)
   https://github.com/tsukiyo-zero/hongguoTV/tree/265472f2d310f1f979dfcbb325e9453c6582fc96/kotlin-tv
 
 When every rendition of the fallback model is ByteVC2, `DramaAPI.fallbackTrack` reads the same `fallback_api` once more with `codec_type=0&force_codec=h264`, the official player's compatibility parameters, which gave upstream HEVC for such episodes. Local changes: inline models whose rows are all ByteVC2 also go to the fallback; other query parameters are kept byte-for-byte; the answer is still filtered by its actual codec, and a replacement that declares another video id or a full duration more than 0.5 s apart is refused. Not verified against a live ByteVC2-only episode.
+
+Single-episode playback endpoint and player signature (2026-11-11)
+
+- LiuWQ0809/hongguo-android, commits `3eaf813` (`PlayerSign.java`), `675f895`, `10bda56` and `1765bfa` (2026-11-11), GPL-3.0-only — `app/src/main/java/com/hongguo/api/core/PlayerSign.java` and `service/AppSource.java`.
+  https://github.com/LiuWQ0809/hongguo-android/tree/1267cdb
+- Its signature algorithm cites Xanerix/guoapp, commit `ad8dc125` (2026-10-21), GPL-3.0.
+  https://github.com/Xanerix/guoapp
+
+From 2026-11-11 every multi-episode playback route (signed GET `video_tab`, signed POST, both hosts) answered 200 with an empty body. `PlayerSign.swift` computes the full x-gorgon, x-argus and x-ladon for `POST /novel/player/video_model/v1/` (7.3.5.32 profile, sorted query), and `DramaAPI.playbackTrack` tries that endpoint first with the request's registered identity before the earlier routes. Local changes: the Swift port includes its own SM3; signatures are checked byte for byte against the upstream test vectors; the single model goes through the same `modelTrack` rules (ByteVC2, fallback, undeclared plain rows), and an inline `video_list` may be an object map. Anonymous live check on 2026-11-11: 7 episodes from two series, including previously ByteVC2-only episodes, all answered by the single endpoint at 1080P and decoded.
