@@ -123,3 +123,13 @@ bash scripts/test-progressive-live.sh --live
 最初移植自 [OOIUa/hongguo-android](https://github.com/OOIUa/hongguo-android) 0.7.5（`72d5531`），此后随 Android 版本同步功能。应用图标与应用内标识来自 Android 0.7.8（`69c1d5a`）的矢量素材，重新生成方式见 [Branding/README.md](Branding/README.md)。
 
 项目按 GPL-3.0-only 分发，许可证和原作者通知保留在 `Resources/`。签名算法来自 `jackotom/hongguo-drama` 的开源实现，在本机由 JavaScriptCore 执行；设备注册、账号与媒体处理参考 Android 版及其列出的 GPL / MIT 来源。详见 `Resources/ThirdPartyNotices.txt`、`Sources/Networking/PureSign.js` 与各源文件注释。分发安装包时应同时提供对应源码及构建脚本，每个 Release 都附有源码 ZIP。
+
+## Star History
+
+<a href="https://www.star-history.com/#OOIUa/hongguo-ios&Date">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=OOIUa/hongguo-ios&type=Date&theme=dark" />
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=OOIUa/hongguo-ios&type=Date" />
+    <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=OOIUa/hongguo-ios&type=Date" />
+  </picture>
+</a>
