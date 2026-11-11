@@ -1,18 +1,17 @@
 {
-  "version": "0.1.22",
-  "build": 23,
+  "version": "0.1.23",
+  "build": 24,
   "minimumOSVersion": "17.0",
   "releaseNotes": [
-    "修复部分新剧（如《谁让这个文盲修仙的第六季》约一半分集）只提供 ByteVC2 编码而无法播放的问题：现在改取同一集的 H.265 片源（Android issue #3）。",
-    "详情页「相关作品」中的待上线作品显示预计上线日期（如「预计11月21日上线」），预约确认和最后一集播完的提示也会带上。",
-    "账号预约列表中待上线的剧显示预计上线日期，平台没有公布时显示「上线时间暂未公布」。"
+    "修复从 11 月 11 日起所有剧集提示「播放服务返回空响应」而无法播放的问题：取流改为先走带完整签名的单集接口，失败时再试旧接口。",
+    "修复 iOS 18 上从播放页点左上角返回时闪退的问题（issue #6）。"
   ],
-  "publishedAt": "2026-11-10T15:40:43Z",
-  "downloadURL": "https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.22/Hongguo-iOS-0.1.22-unsigned.ipa",
-  "sha256": "1b7b0c5598fb859ca65d3729dbf1ea09c94ff3b1ead3c3b644f71528e2bd9fef",
-  "size": 1792380,
+  "publishedAt": "2026-11-11T07:27:05Z",
+  "downloadURL": "https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.23/Hongguo-iOS-0.1.23-unsigned.ipa",
+  "sha256": "f76da32fa771e7b5e1e7091ba6fb4df882889b7a127adfb40d39e79ef2862858",
+  "size": 1809565,
   "mirrors": {
-    "gh-proxy": "https://gh-proxy.com/https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.22/Hongguo-iOS-0.1.22-unsigned.ipa",
-    "ghfast": "https://ghfast.top/https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.22/Hongguo-iOS-0.1.22-unsigned.ipa"
+    "gh-proxy": "https://gh-proxy.com/https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.23/Hongguo-iOS-0.1.23-unsigned.ipa",
+    "ghfast": "https://ghfast.top/https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.23/Hongguo-iOS-0.1.23-unsigned.ipa"
   }
 }
