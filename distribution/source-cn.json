@@ -3,24 +3,24 @@
   "message": "项目维护者发布的未签名 IPA；需要自行签名安装。加速服务由第三方提供。",
   "identifier": "ooiua.hongguo-ios.source-cn",
   "sourceURL": "https://gh-proxy.com/https://raw.githubusercontent.com/OOIUa/hongguo-ios/main/distribution/source-cn.json",
-  "sourceicon": "https://gh-proxy.com/https://raw.githubusercontent.com/OOIUa/hongguo-ios/v0.1.23/distribution/icon.png",
+  "sourceicon": "https://gh-proxy.com/https://raw.githubusercontent.com/OOIUa/hongguo-ios/v0.1.24/distribution/icon.png",
   "apps": [
     {
       "name": "红果独立版",
       "type": "1",
       "bundleIdentifier": "com.ooiua.hongguo.ios",
-      "version": "0.1.23",
-      "build": 24,
+      "version": "0.1.24",
+      "build": 25,
       "minimumOSVersion": "17.0",
-      "versionDate": "2026-11-11T07:27:05Z",
-      "versionDescription": "修复从 11 月 11 日起所有剧集提示「播放服务返回空响应」而无法播放的问题：取流改为先走带完整签名的单集接口，失败时再试旧接口。\n修复 iOS 18 上从播放页点左上角返回时闪退的问题（issue #6）。\n未签名 IPA，需使用本人的证书签名后安装。",
+      "versionDate": "2026-11-12T05:41:06Z",
+      "versionDescription": "修复榜单打不开、提示「榜单格式已变化」的问题（官网改版）。\n修复收藏提示读取失败的问题：改读官方新版使用的书架列表，失败时再试旧接口。\n预约被红果明确拒绝时（如风控）提示未写入账号，不再只显示结果不确定。\n未签名 IPA，需使用本人的证书签名后安装。",
       "lock": "0",
-      "downloadURL": "https://gh-proxy.com/https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.23/Hongguo-iOS-0.1.23-unsigned.ipa",
+      "downloadURL": "https://gh-proxy.com/https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.24/Hongguo-iOS-0.1.24-unsigned.ipa",
       "isLanZouCloud": "0",
-      "iconURL": "https://gh-proxy.com/https://raw.githubusercontent.com/OOIUa/hongguo-ios/v0.1.23/distribution/icon.png",
+      "iconURL": "https://gh-proxy.com/https://raw.githubusercontent.com/OOIUa/hongguo-ios/v0.1.24/distribution/icon.png",
       "tintColor": "E8463F",
-      "size": "1809565",
-      "sha256": "f76da32fa771e7b5e1e7091ba6fb4df882889b7a127adfb40d39e79ef2862858"
+      "size": "1818548",
+      "sha256": "3cb9f6f86c96d3ef58713fbd830441f193fbad3930201ff2526f138e7a670773"
     }
   ]
 }
