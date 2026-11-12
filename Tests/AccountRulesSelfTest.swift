@@ -6,6 +6,14 @@ struct AccountRulesSelfTest {
         func check(_ value: @autoclosure () -> Bool, _ name: String) throws {
             guard value() else { throw HGError.message("FAIL " + name) }
         }
+        func shelf(_ json: String) throws -> [String] { try AccountRules.favoriteList(ProtocolJSON.object(Data(json.utf8))) }
+        let lightShelf = try shelf(#"{"code":0,"data":{"max_bookshelf_cnt":10000,"video_shelf_info":[{"series_id":7702763145030290457,"collect_time":1762000000},{"series_id":"7702000000000000002","collect_time":1763000000},{"series_id":"bad"},{"series_id":"7702000000000000002","collect_time":1}]}}"#)
+        try check(lightShelf == ["7702000000000000002","7702763145030290457"], "light-shelf-newest-first")
+        let nullShelf = try shelf(#"{"code":0,"data":{"video_shelf_info":null}}"#)
+        try check(nullShelf.isEmpty, "light-shelf-null-is-empty")
+        try check((try? shelf(#"{"code":0,"data":null}"#)) == nil, "light-shelf-null-data-rejected")
+        try check((try? shelf(#"{"code":0,"data":{"video_shelf_info":[{"series_id":"bad"}]}}"#)) == nil, "light-shelf-bad-rows-rejected")
+        try check(AccountRules.reserveRefusal(code: 101144).contains("风控") && AccountRules.reserveRefusal(code: 4).contains("错误码 4"), "reserve-refusal-text")
         try check(AccountRules.businessID(true) == nil, "boolean-is-not-identity")
         try check(AccountRules.businessID(NSNumber(value: true)) == nil, "boxed-boolean-is-not-identity")
         try check(AccountRules.businessID(123.5) == nil, "float-is-not-identity")

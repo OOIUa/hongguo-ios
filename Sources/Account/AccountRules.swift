@@ -9,6 +9,31 @@ struct AccountStats: Sendable {
 }
 
 enum AccountRules {
+    /// Light `bookshelf/video/list` shelf: ids and times only, newest first. Accounts on this logic get
+    /// `data: null` from the older `video/info` read (Android issue #6, 2026-11-11).
+    static func favoriteList(_ raw: [String: Any]) throws -> [String] {
+        guard let data = raw["data"] as? [String: Any] else { throw HGError.message("账户收藏数据格式发生变化") }
+        guard let value = data["video_shelf_info"] else { throw HGError.message("账户收藏列表格式发生变化") }
+        if value is NSNull { return [] }
+        guard let rows = value as? [Any] else { throw HGError.message("账户收藏列表格式发生变化") }
+        var seen = Set<String>(), result = [(id: String, at: Int64)]()
+        for value in rows {
+            let row = ProtocolJSON.dictionary(value)
+            let id = ProtocolJSON.text(row["series_id"]).isEmpty ? ProtocolJSON.text(row["book_id"]) : ProtocolJSON.text(row["series_id"])
+            guard ProtocolJSON.identifier(id) != nil, seen.insert(id).inserted else { continue }
+            let collected = Int64(ProtocolJSON.text(row["collect_time"])) ?? 0
+            result.append((id, collected > 0 ? collected : Int64(ProtocolJSON.text(row["last_operate_time"])) ?? 0))
+        }
+        guard rows.isEmpty || !result.isEmpty else { throw HGError.message("账户收藏条目格式发生变化") }
+        return result.enumerated().sorted { $0.element.at != $1.element.at ? $0.element.at > $1.element.at : $0.offset < $1.offset }.map(\.element.id)
+    }
+
+    /// A non-zero business code is a definite refusal of the write, not an unknown outcome (Android issue #7).
+    static func reserveRefusal(code: Int) -> String {
+        code == 101144 ? "红果风控拒绝了本次预约（错误码 101144），未写入账号；可稍后重试或在官方 App 预约"
+            : "红果拒绝了本次预约（错误码 \(code)），未写入账号"
+    }
+
     /// Protocol reference: charlie901208/HGTV AccountParser.likes.
     static func likes(_ raw: [String: Any]) -> [Drama] {
         var seen = Set<String>(), rows = [(drama: Drama, at: Int64)]()

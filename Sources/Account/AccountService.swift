@@ -424,7 +424,10 @@ final class AccountService: ObservableObject {
             message = isReserved(work.id) ? "已确认云端预约成功" : "云端未确认本次预约，请稍后刷新核对；不会自动重试"
         } catch {
             guard ticket == generation else { return }
-            if !handleExpired(error) { message = submitted ? "预约结果不确定，请稍后刷新核对；不会自动重试" : safeMessage(error) }
+            if !handleExpired(error) {
+                if submitted, let refusal = error as? AccountFailure { message = AccountRules.reserveRefusal(code: refusal.code) }
+                else { message = submitted ? "预约结果不确定，请稍后刷新核对；不会自动重试" : safeMessage(error) }
+            }
         }
     }
 
@@ -516,7 +519,37 @@ final class AccountService: ObservableObject {
         return (json,response)
     }
 
+    /// Current official clients read the light `video/list` shelf and name it from the detail batch; `video/info`
+    /// stays as the fallback when the light list fails, or is empty for an account still on the old logic.
     private func fetchFavorites(_ candidate: AccountCredentials) async throws -> [Drama] {
+        let light: [String]?
+        do { light = try AccountRules.favoriteList(try await appJSON(candidate, path: "/reading/bookapi/bookshelf/video/list/v1/").0) }
+        catch let failure as AccountFailure where failure.expired { throw failure }
+        catch is CancellationError { throw CancellationError() }
+        catch { light = nil }
+        guard let ids = light else { return try await fetchLegacyFavorites(candidate) }
+        if ids.isEmpty {
+            // The light list already answered; the legacy shelf can only add rows, never turn that answer into an error.
+            do { return try await fetchLegacyFavorites(candidate) }
+            catch let failure as AccountFailure where failure.expired { throw failure }
+            catch is CancellationError { throw CancellationError() }
+            catch { return [] }
+        }
+        let shown = Array(ids.prefix(200))
+        var mapped = [String:Drama]()
+        for start in stride(from: 0, to: shown.count, by: 50) {
+            let batch = shown[start..<min(start + 50, shown.count)]
+            do {
+                let (metadata,_) = try await appJSON(candidate, path: "/reading/bookapi/multi-detail/v1/", params: ["book_id":batch.joined(separator: ","),"book_type":"2"])
+                for row in ProtocolJSON.array(metadata["data"]).map({ ProtocolJSON.dictionary($0) }) { if let item = drama(row: row, video: row) { mapped[item.id] = item } }
+            } catch let failure as AccountFailure where failure.expired { throw failure }
+            catch is CancellationError { throw CancellationError() }
+            catch { }
+        }
+        return shown.map { mapped[$0] ?? Drama(id: $0, title: "剧集 \($0)", coverURL: "", summary: "", episodeCount: 0) }
+    }
+
+    private func fetchLegacyFavorites(_ candidate: AccountCredentials) async throws -> [Drama] {
         let (raw,_) = try await appJSON(candidate, path: "/reading/bookapi/bookshelf/video/info/v1/")
         let data = ProtocolJSON.dictionary(raw["data"])
         guard data["video_shelf_info"] != nil else { throw HGError.message("账户收藏数据格式发生变化") }

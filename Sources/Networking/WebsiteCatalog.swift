@@ -38,6 +38,7 @@ enum WebsiteCatalog {
     }
 
     static func parseRank(_ html: String, board: RankBoard, page: Int) throws -> RankPage {
+        if let payload = inlineRankContent(html, board: board) { return try rankPage(payload, page: page) }
         for pattern in ["data-fn-args='([^']*)'", "data-fn-args=\"([^\"]*)\""] {
             let expression = try NSRegularExpression(pattern: pattern)
             for match in expression.matches(in: html, range: NSRange(html.startIndex..., in: html)) {
@@ -48,23 +49,70 @@ enum WebsiteCatalog {
                 if let object = args[2] as? [String: Any] { payload = object }
                 else if let text = args[2] as? String, let object = try? ProtocolJSON.object(Data(text.utf8)) { payload = object }
                 else { continue }
-                guard ProtocolJSON.bool(payload["isSuccess"]) else { throw HGError.message("榜单暂不可用") }
-                guard let rows = payload["rankList"] as? [Any] else { throw HGError.message("榜单格式已变化") }
-                let paging = ProtocolJSON.dictionary(payload["pagination"]), total = ProtocolJSON.integer(paging["totalPages"])
-                guard total >= 1, paging["pageNum"] == nil || ProtocolJSON.integer(paging["pageNum"]) == page else { throw HGError.message("榜单分页信息异常") }
-                var seen = Set<String>(), entries = [RankEntry]()
-                for value in rows {
-                    let row = ProtocolJSON.dictionary(value), series = ProtocolJSON.text(row["seriesId"]), id = series.isEmpty ? ProtocolJSON.text(row["id"]) : series
-                    let title = ProtocolJSON.text(row["title"])
-                    guard ProtocolJSON.identifier(id) != nil, !title.isEmpty, seen.insert(id).inserted else { continue }
-                    let count = row["episodeCount"] != nil ? ProtocolJSON.integer(row["episodeCount"]) : ProtocolJSON.array(row["episodeVids"]).count
-                    entries.append(RankEntry(drama: Drama(id: id, title: title, coverURL: ProtocolJSON.text(row["cover"]), summary: ProtocolJSON.text(row["description"]), episodeCount: max(0, count)),
-                                             rank: max(0, ProtocolJSON.integer(row["rank"])), heat: ProtocolJSON.text(row["heatText"])))
-                }
-                return RankPage(entries: entries, page: page, totalPages: min(total, 100))
+                return try rankPage(payload, page: page)
             }
         }
         throw HGError.message("榜单格式已变化")
+    }
+
+    /// Since 2026-11-11 the site renders the loader result inline as `_ROUTER_DATA = {...}`
+    /// (loaderData["rank_<route>/page"].content); the streamed data-fn-args payload is gone (Android issue #8).
+    static func inlineRankContent(_ html: String, board: RankBoard) -> [String: Any]? {
+        let marker = Array("_ROUTER_DATA = ".utf8), bytes = Array(html.utf8)
+        var at = 0
+        while let start = firstIndex(of: marker, in: bytes, from: at) {
+            let open = start + marker.count
+            at = open
+            guard open < bytes.count, bytes[open] == UInt8(ascii: "{"), let close = objectEnd(bytes, from: open),
+                  let root = try? ProtocolJSON.object(Data(bytes[open...close])) else { continue }
+            let loader = ProtocolJSON.dictionary(ProtocolJSON.dictionary(root["loaderData"])[board.loader])
+            if let content = loader["content"] as? [String: Any] { return content }
+        }
+        return nil
+    }
+
+    private static func firstIndex(of marker: [UInt8], in bytes: [UInt8], from: Int) -> Int? {
+        guard !marker.isEmpty, bytes.count >= marker.count, from <= bytes.count - marker.count else { return nil }
+        for index in from...(bytes.count - marker.count) where bytes[index] == marker[0] && Array(bytes[index..<index + marker.count]) == marker { return index }
+        return nil
+    }
+
+    /// Index of the brace closing the JSON object that starts at `open`; strings and escapes are skipped.
+    private static func objectEnd(_ bytes: [UInt8], from open: Int) -> Int? {
+        var depth = 0, inString = false, escaped = false
+        for index in open..<bytes.count {
+            let byte = bytes[index]
+            if inString {
+                if escaped { escaped = false } else if byte == UInt8(ascii: "\\") { escaped = true } else if byte == UInt8(ascii: "\"") { inString = false }
+                continue
+            }
+            switch byte {
+            case UInt8(ascii: "\""): inString = true
+            case UInt8(ascii: "{"), UInt8(ascii: "["): depth += 1
+            case UInt8(ascii: "}"), UInt8(ascii: "]"):
+                depth -= 1
+                if depth == 0 { return index }
+            default: break
+            }
+        }
+        return nil
+    }
+
+    private static func rankPage(_ payload: [String: Any], page: Int) throws -> RankPage {
+        guard ProtocolJSON.bool(payload["isSuccess"]) else { throw HGError.message("榜单暂不可用") }
+        guard let rows = payload["rankList"] as? [Any] else { throw HGError.message("榜单格式已变化") }
+        let paging = ProtocolJSON.dictionary(payload["pagination"]), total = ProtocolJSON.integer(paging["totalPages"])
+        guard total >= 1, paging["pageNum"] == nil || ProtocolJSON.integer(paging["pageNum"]) == page else { throw HGError.message("榜单分页信息异常") }
+        var seen = Set<String>(), entries = [RankEntry]()
+        for value in rows {
+            let row = ProtocolJSON.dictionary(value), series = ProtocolJSON.text(row["seriesId"]), id = series.isEmpty ? ProtocolJSON.text(row["id"]) : series
+            let title = ProtocolJSON.text(row["title"])
+            guard ProtocolJSON.identifier(id) != nil, !title.isEmpty, seen.insert(id).inserted else { continue }
+            let count = row["episodeCount"] != nil ? ProtocolJSON.integer(row["episodeCount"]) : ProtocolJSON.array(row["episodeVids"]).count
+            entries.append(RankEntry(drama: Drama(id: id, title: title, coverURL: ProtocolJSON.text(row["cover"]), summary: ProtocolJSON.text(row["description"]), episodeCount: max(0, count)),
+                                     rank: max(0, ProtocolJSON.integer(row["rank"])), heat: ProtocolJSON.text(row["heatText"])))
+        }
+        return RankPage(entries: entries, page: page, totalPages: min(total, 100))
     }
 
     static func parseSuggestions(_ object: [String: Any]) -> [String] {

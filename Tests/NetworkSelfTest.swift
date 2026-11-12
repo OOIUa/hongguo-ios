@@ -224,6 +224,16 @@ import JavaScriptCore
         precondition((try? WebsiteCatalog.parseRank(rankPage("hot-drama", success: false), board: .all, page: 1)) == nil)
         precondition((try? WebsiteCatalog.parseRank(rankPage("hot-drama", number: 3), board: .all, page: 1)) == nil)
         precondition((try? WebsiteCatalog.parseRank("<html></html>", board: .all, page: 1)) == nil)
+        // Shape served since 2026-11-11: loader data inline as _ROUTER_DATA, the fn-args call carries no payload.
+        func inlinePage(_ route: String, number: Int = 1) -> String {
+            #"<html><script async="" data-script-src="modern-inline">_ROUTER_DATA = {"loaderData":{"rank_layout":null,"rank_\#(route)/page":{"pageNum":\#(number),"note":"a \"}{\" b","content":{"isSuccess":true,"rankList":[{"id":"801","seriesId":"801","rank":1,"title":"甲</b>","cover":"https://p.example.invalid/1.jpg","heatText":"8835万热度","episodeCount":120},{"seriesId":"802","rank":2,"title":"乙"}],"pagination":{"pageNum":\#(number),"totalPages":5}}}},"errors":null};"# +
+            #"function runWindowFn(){}</script><script async="" data-fn-name="mergeLoaderData" data-fn-args="[&quot;rank_\#(route)/page&quot;,[]]">runWindowFn();</script></html>"#
+        }
+        let inline = try WebsiteCatalog.parseRank(inlinePage("hot-comic-drama", number: 2), board: .comic, page: 2)
+        precondition(inline.entries.map(\.id) == ["801","802"] && inline.entries[0].drama.coverURL == "https://p.example.invalid/1.jpg")
+        precondition(inline.entries[0].drama.episodeCount == 120 && inline.entries[0].drama.title == "甲</b>" && inline.totalPages == 5)
+        precondition((try? WebsiteCatalog.parseRank(inlinePage("hot-drama"), board: .comic, page: 1)) == nil)
+        precondition((try? WebsiteCatalog.parseRank(inlinePage("hot-comic-drama", number: 3), board: .comic, page: 1)) == nil)
         precondition(WebsiteCatalog.rankURL(.real, page: 2).absoluteString == "https://hongguoduanju.com/rank/hot-real-drama?page=2")
         precondition(WebsiteCatalog.rankURL(.all, page: 1).absoluteString == "https://hongguoduanju.com/rank/hot-drama")
         precondition(WebsiteCatalog.parseSuggestions(["suggest_list": (1...12).map { ["name": "剧\($0)"] }]).count == 8)
