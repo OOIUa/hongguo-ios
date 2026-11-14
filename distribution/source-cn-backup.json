@@ -3,24 +3,24 @@
   "message": "项目维护者发布的未签名 IPA；需要自行签名安装。加速服务由第三方提供。",
   "identifier": "ooiua.hongguo-ios.source-cn-backup",
   "sourceURL": "https://ghfast.top/https://raw.githubusercontent.com/OOIUa/hongguo-ios/main/distribution/source-cn-backup.json",
-  "sourceicon": "https://ghfast.top/https://raw.githubusercontent.com/OOIUa/hongguo-ios/v0.1.24/distribution/icon.png",
+  "sourceicon": "https://ghfast.top/https://raw.githubusercontent.com/OOIUa/hongguo-ios/v0.1.25/distribution/icon.png",
   "apps": [
     {
       "name": "红果独立版",
       "type": "1",
       "bundleIdentifier": "com.ooiua.hongguo.ios",
-      "version": "0.1.24",
-      "build": 25,
+      "version": "0.1.25",
+      "build": 26,
       "minimumOSVersion": "17.0",
-      "versionDate": "2026-11-12T05:41:06Z",
-      "versionDescription": "修复榜单打不开、提示「榜单格式已变化」的问题（官网改版）。\n修复收藏提示读取失败的问题：改读官方新版使用的书架列表，失败时再试旧接口。\n预约被红果明确拒绝时（如风控）提示未写入账号，不再只显示结果不确定。\n未签名 IPA，需使用本人的证书签名后安装。",
+      "versionDate": "2026-11-14T07:15:11Z",
+      "versionDescription": "修复推荐页重复：按匿名与不同账号保存最近 540 部推荐，重开应用后继续去重。\n修复首页顶部推荐与下方海报网格重复展示，以及漫剧榜单续页重复。\n本机片单读取失败时保留原数据、暂停写入，可重试读取，避免空记录覆盖。\n修复预约成功后的回读失败被误报为「未写入账号」。\n未签名 IPA，需使用本人的证书签名后安装。",
       "lock": "0",
-      "downloadURL": "https://ghfast.top/https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.24/Hongguo-iOS-0.1.24-unsigned.ipa",
+      "downloadURL": "https://ghfast.top/https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.25/Hongguo-iOS-0.1.25-unsigned.ipa",
       "isLanZouCloud": "0",
-      "iconURL": "https://ghfast.top/https://raw.githubusercontent.com/OOIUa/hongguo-ios/v0.1.24/distribution/icon.png",
+      "iconURL": "https://ghfast.top/https://raw.githubusercontent.com/OOIUa/hongguo-ios/v0.1.25/distribution/icon.png",
       "tintColor": "E8463F",
-      "size": "1818548",
-      "sha256": "3cb9f6f86c96d3ef58713fbd830441f193fbad3930201ff2526f138e7a670773"
+      "size": "1843573",
+      "sha256": "dd80490fcfc3df77c1da9c5c2c80c65ef25d1bf02b58b7974cc408f7dbe930c6"
     }
   ]
 }
