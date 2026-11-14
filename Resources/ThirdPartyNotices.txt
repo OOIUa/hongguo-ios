@@ -71,3 +71,9 @@ Single-episode playback endpoint and player signature (2026-11-11)
   https://github.com/Xanerix/guoapp
 
 From 2026-11-11 every multi-episode playback route (signed GET `video_tab`, signed POST, both hosts) answered 200 with an empty body. `PlayerSign.swift` computes the full x-gorgon, x-argus and x-ladon for `POST /novel/player/video_model/v1/` (7.3.5.32 profile, sorted query), and `DramaAPI.playbackTrack` tries that endpoint first with the request's registered identity before the earlier routes. Local changes: the Swift port includes its own SM3; signatures are checked byte for byte against the upstream test vectors; the single model goes through the same `modelTrack` rules (ByteVC2, fallback, undeclared plain rows), and an inline `video_list` may be an object map. Anonymous live check on 2026-11-11: 7 episodes from two series, including previously ByteVC2-only episodes, all answered by the single endpoint at 1080P and decoded.
+
+Comic ranking pagination (2026-11-14)
+
+- Reference: sunnysky123/hongguo-web, commit `1b00f06` (2026-11-13), MIT.
+  https://github.com/sunnysky123/hongguo-web/commit/1b00f06
+- `ComicRankPager.swift` follows the upstream observation that cell/change ignores offset: send recent series IDs through filter_ids, accumulate unique rows, and stop when no new works arrive. The Swift implementation bounds each page to three requests.

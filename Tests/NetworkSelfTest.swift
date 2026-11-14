@@ -83,6 +83,58 @@ import JavaScriptCore
         precondition(calls.values.map(\.offset) == [0, 3] && calls.values[1].session == "srv" && calls.values[1].filterIDs.count == 3)
         let second = try await pager.next()
         precondition(second.nextOffset > first.nextOffset)
+        // A fresh process/pager with the same account restores disk dedupe; another account stays independent.
+        let historyRoot = FileManager.default.temporaryDirectory.appendingPathComponent("hongguo-recommendation-test-" + UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: historyRoot) }
+        let history = RecommendationHistory(directory: historyRoot)
+        let rememberedPager = GuessPager(owner: UUID(), history: history, historyKey: "account-a") { cursor in
+            var next = cursor; next.offset += 6
+            return GuessBatch(dramas: (0..<6).map(drama), session: "", cursor: next)
+        }
+        let originalRecommendations = try await rememberedPager.next()
+        precondition(originalRecommendations.dramas.count == 6)
+        let restoredHistory = RecommendationHistory(directory: historyRoot)
+        let relaunched = GuessPager(owner: UUID(), history: restoredHistory, historyKey: "account-a") { cursor in
+            var next = cursor; next.offset += 6
+            return GuessBatch(dramas: (0..<12).map(drama), session: "", cursor: next)
+        }
+        let afterRelaunch = try await relaunched.next()
+        precondition(afterRelaunch.dramas.map(\.id) == (6..<12).map { drama($0).id }, "Relaunch replayed previously recommended works")
+        let anotherAccount = GuessPager(owner: UUID(), history: restoredHistory, historyKey: "account-b") { cursor in
+            var next = cursor; next.offset += 6
+            return GuessBatch(dramas: (0..<6).map(drama), session: "", cursor: next)
+        }
+        let independent = try await anotherAccount.next()
+        precondition(independent.dramas.count == 6, "One account's recommendation history filtered another account")
+        await history.remember((0..<550).map { drama($0).id }, for: "bounded")
+        let boundedHistory = await RecommendationHistory(directory: historyRoot).recent(for: "bounded")
+        precondition(boundedHistory.count == 540 && boundedHistory.first == drama(10).id && boundedHistory.last == drama(549).id)
+        let privateBytes = try String(contentsOf: historyRoot.appendingPathComponent("recommendations-v1.json"), encoding: .utf8)
+        precondition(!privateBytes.contains("account-a") && !privateBytes.contains("account-b"), "Raw account keys must not be stored")
+        // A cancelled request may not consume recommendations or persist them as already shown.
+        let cancelPager = GuessPager(owner: nil, history: history, historyKey: "cancelled") { cursor in
+            withUnsafeCurrentTask { $0?.cancel() }
+            return GuessBatch(dramas: [drama(999)], session: "", cursor: cursor)
+        }
+        let cancelledPage = Task { try await cancelPager.next() }
+        do { _ = try await cancelledPage.value; fatalError("Cancelled recommendation response was accepted") } catch is CancellationError { }
+        let cancelledHistory = await history.recent(for: "cancelled")
+        precondition(cancelledHistory.isEmpty)
+        // Comic rankings ignore offset upstream: filter_ids must carry the round and local duplicates must be removed.
+        let rankRows = (0..<40).map(drama)
+        let rankPager = ComicRankPager { filters in
+            let remaining = rankRows.filter { !filters.contains($0.id) }
+            let rows = Array(remaining.prefix(10))
+            return ComicRankBatch(dramas: rows + Array(rows.prefix(1)), hasMore: remaining.count > 10)
+        }
+        let rankFirst = try await rankPager.page(offset: 0)
+        let rankSecond = try await rankPager.page(offset: rankFirst.nextOffset)
+        let rankLast = try await rankPager.page(offset: rankSecond.nextOffset)
+        precondition(rankFirst.dramas.count == 18 && rankSecond.dramas.count == 18 && rankLast.dramas.count == 4 && !rankLast.hasMore)
+        precondition((rankFirst.dramas + rankSecond.dramas + rankLast.dramas).map(\.id) == rankRows.map(\.id), "Comic pagination skipped or repeated works")
+        let stuckRank = ComicRankPager { _ in ComicRankBatch(dramas: Array(rankRows.prefix(3)), hasMore: true) }
+        let stuckPage = try await stuckRank.page(offset: 0)
+        precondition(stuckPage.dramas.count == 3 && !stuckPage.hasMore, "An upstream repeating the same rank page must stop")
         let repeating = GuessPager(owner: nil) { cursor in
             var next = cursor; next.offset += 1
             return GuessBatch(dramas: [drama(1)], session: "", cursor: next)
@@ -93,6 +145,10 @@ import JavaScriptCore
         // A refresh by the same owner keeps dedupe and reports that nothing new arrived; another owner starts clean.
         let refreshed = GuessPager(owner: nil, previous: repeating) { cursor in GuessBatch(dramas: [drama(1)], session: "", cursor: cursor) }
         do { _ = try await refreshed.next(); fatalError("Replaying old works must be reported") }
+        catch let error as HGError { precondition(error.localizedDescription.contains("最近已去重 1 部")) }
+        let intermediateRefresh = GuessPager(owner: nil, previous: repeating) { cursor in GuessBatch(dramas: [drama(1)], session: "", cursor: cursor) }
+        let rapidRefresh = GuessPager(owner: nil, previous: intermediateRefresh) { cursor in GuessBatch(dramas: [drama(1)], session: "", cursor: cursor) }
+        do { _ = try await rapidRefresh.next(); fatalError("Two rapid refreshes lost inherited recommendation history") }
         catch let error as HGError { precondition(error.localizedDescription.contains("最近已去重 1 部")) }
         let other = GuessPager(owner: UUID(), previous: repeating) { cursor in GuessBatch(dramas: [drama(1)], session: "", cursor: cursor) }
         let otherPage = try await other.next(); precondition(otherPage.dramas.count == 1)

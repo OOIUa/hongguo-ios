@@ -301,27 +301,42 @@ actor GuessPager {
     private var seen = [String]()
     private var inherit: GuessPager?
     private var batches = 0
+    private let history: RecommendationHistory?
+    private let historyKey: String
+    private var restored = false
 
-    init(owner: UUID?, previous: GuessPager? = nil, fetch: @escaping @Sendable (GuessCursor) async throws -> GuessBatch) {
+    init(owner: UUID?, previous: GuessPager? = nil, history: RecommendationHistory? = nil, historyKey: String = "anonymous",
+         fetch: @escaping @Sendable (GuessCursor) async throws -> GuessBatch) {
         self.owner = owner; self.fetch = fetch
+        self.history = history; self.historyKey = historyKey
         inherit = previous?.owner == owner ? previous : nil
     }
 
-    var seenIDs: [String] { seen }
+    var seenIDs: [String] { get async { await restoreSeen(); return seen } }
+
+    private func restoreSeen() async {
+        guard !restored else { return }
+        if let previous = inherit { seen = await previous.seenIDs; inherit = nil }
+        if let history { seen = RecommendationHistory.normalized(await history.recent(for: historyKey) + seen) }
+        restored = true
+    }
 
     func next() async throws -> DramaPage {
-        if let previous = inherit { inherit = nil; seen = await previous.seenIDs }
+        await restoreSeen()
+        try Task.checkCancellation()
         let firstPage = batches == 0
         var dramas = [Drama](), requests = 0
         while dramas.count < 6 && requests < 3 && cursor.offset <= GuessFeed.maxOffset {
             var request = cursor
             request.filterIDs = seen
             let batch = try await fetch(request)
+            try Task.checkCancellation()
             requests += 1; batches += 1
             cursor = batch.cursor
             for drama in batch.dramas where !seen.contains(drama.id) { seen.append(drama.id); dramas.append(drama) }
-            if seen.count > 540 { seen.removeFirst(seen.count - 540) }
+            if seen.count > RecommendationHistory.limit { seen.removeFirst(seen.count - RecommendationHistory.limit) }
         }
+        if let history { await history.remember(seen, for: historyKey) }
         if firstPage && dramas.isEmpty && !seen.isEmpty {
             throw HGError.message("推荐接口暂未返回新作品（最近已去重 \(seen.count) 部），可稍后刷新，或切换其他分类继续发现。")
         }

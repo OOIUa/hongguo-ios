@@ -175,8 +175,8 @@ final class CatalogLoader: ObservableObject {
                 let page = try await fetch(requestedOffset)
                 try Task.checkCancellation()
                 guard let self, self.generation == ticket else { return }
-                let existing = Set(self.dramas.map(\.id))
-                let fresh = page.dramas.filter { !existing.contains($0.id) }
+                var existing = Set(self.dramas.map(\.id))
+                let fresh = page.dramas.filter { existing.insert($0.id).inserted }
                 self.dramas += fresh
                 self.hasMore = page.hasMore && !fresh.isEmpty && page.nextOffset > requestedOffset
                 self.offset = page.nextOffset

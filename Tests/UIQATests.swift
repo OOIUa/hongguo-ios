@@ -2,6 +2,27 @@ import XCTest
 
 @MainActor
 final class HongguoQATests: XCTestCase {
+    /// Anonymous live catalogue only, using a task-specific simulator with no personal account.
+    func testHomeSectionsDoNotRepeat() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication(bundleIdentifier: "com.ooiua.hongguo.ios")
+        func ids(_ prefix: String) -> Set<String> {
+            Set(app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", prefix))
+                .allElementsBoundByIndex.map { String($0.identifier.dropFirst(prefix.count)) })
+        }
+        for (theme, prefix) in [("warm", "home.featured."), ("cards", "home.ranking.")] {
+            app.launchArguments = ["-theme", theme, "-hasChosenTheme", "YES", "-updates.checkOnLaunch", "NO"]
+            app.launch()
+            XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", prefix)).firstMatch.waitForExistence(timeout: 60))
+            let featuredIDs = ids(prefix)
+            XCTAssertFalse(featuredIDs.isEmpty)
+            XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "home.grid.")).firstMatch.waitForExistence(timeout: 15))
+            XCTAssertTrue(featuredIDs.intersection(ids("home.grid.")).isEmpty, "Featured recommendations must not repeat in the poster grid")
+            capture("home-\(theme)-unique-sections")
+            app.terminate()
+        }
+    }
+
     func testUpdateSourcesAndVersion() throws {
         continueAfterFailure = false
         let app = XCUIApplication(bundleIdentifier: "com.ooiua.hongguo.ios")

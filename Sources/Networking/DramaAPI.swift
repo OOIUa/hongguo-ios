@@ -25,6 +25,7 @@ actor DramaAPI {
     private var releaseCache: [String: String] = [:]
     private let suggestionWebID = UUID().uuidString.lowercased()
     private var filterCache: [String: [FilterGroup]] = [:]
+    private var comicRankPager: ComicRankPager?
 
     private struct SearchCursor { var upstreamOffset = 0; var passback = ""; var searchID = ""; var results = [Drama](); var hasMore = true; var fetchedAt = Date() }
 
@@ -627,17 +628,27 @@ actor DramaAPI {
     }
 
     private func rank(offset: Int) async throws -> DramaPage {
+        if offset == 0 || comicRankPager == nil {
+            comicRankPager = ComicRankPager { [weak self] ids in
+                guard let self else { throw CancellationError() }
+                return try await self.comicRankBatch(filterIDs: ids)
+            }
+        }
+        guard let pager = comicRankPager else { throw CancellationError() }
+        return try await pager.page(offset: max(0, offset))
+    }
+
+    private func comicRankBatch(filterIDs: [String]) async throws -> ComicRankBatch {
         let extra = [["cell_id","7470092475068071998"],["tab_type","26"],["client_req_type","2"],["client_template","2"],
             ["screen_width_px","1350"],["selected_items","comic_series_rank"],["sub_selected_items","comic_series_hot_rank"],
-            ["session_uuid",UUID().uuidString.lowercased()],["offset",String(max(0,offset))]]
+            ["session_uuid",UUID().uuidString.lowercased()],["filter_ids",filterIDs.suffix(200).joined(separator: ",")]]
         let response = try await api(path: "/reading/bookapi/bookmall/cell/change/v", extra: extra)
         let cell = ProtocolJSON.dictionary(ProtocolJSON.dictionary(response["data"])["cell_view"]), raw = ProtocolJSON.array(cell["cell_data"])
         let dramas = raw.compactMap { item -> Drama? in
             let row = ProtocolJSON.dictionary(item), value = row["video_data"]
             return parseDrama(ProtocolJSON.dictionary((value as? [Any])?.first ?? value))
         }
-        let declared = ProtocolJSON.integer(cell["next_offset"]), next = declared > offset ? declared : offset + raw.count
-        return DramaPage(dramas: dramas, hasMore: ProtocolJSON.bool(cell["has_more"]) && !raw.isEmpty && next > offset, nextOffset: next)
+        return ComicRankBatch(dramas: dramas, hasMore: ProtocolJSON.bool(cell["has_more"]) && !raw.isEmpty)
     }
 
     private func api(path: String, body: [String: Any]? = nil, extra: [[String]] = []) async throws -> [String: Any] {

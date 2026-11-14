@@ -301,6 +301,7 @@ final class AccountService: ObservableObject {
 
     /// Whose 猜你喜欢 a new round shows: the verified app account's session, or nil for the anonymous feed.
     var guessOwner: UUID? { authenticated && credentials != nil ? generation : nil }
+    var guessHistoryKey: String { authenticated && !profileID.isEmpty ? "account:" + profileID : "anonymous" }
 
     /// One 猜你喜欢 batch. A non-nil owner carries that account's login cookie only while the same login session
     /// is still active, so an old round's pagination never mixes into a new account.
@@ -405,6 +406,7 @@ final class AccountService: ObservableObject {
         let ticket = generation; busy = true; message = nil
         defer { if ticket == generation { busy = false } }
         var submitted = false
+        var acknowledged = false
         func read() async throws -> [CloudReservation] {
             let online = try await fetchReservations(candidate, online: true)
             let upcoming = try await fetchReservations(candidate, online: false)
@@ -418,6 +420,7 @@ final class AccountService: ObservableObject {
             submitted = true
             _ = try await appJSON(candidate, path: "/reading/bookapi/search/uncover_subscribe/v1/",
                                   body: ProtocolJSON.data(["item_id":itemID,"item_type":3,"op_type":1,"subscribe_source":0]), gzip: true)
+            acknowledged = true
             let after = try await read()
             guard ticket == generation else { return }
             reservations = after; try? persist()
@@ -425,7 +428,7 @@ final class AccountService: ObservableObject {
         } catch {
             guard ticket == generation else { return }
             if !handleExpired(error) {
-                if submitted, let refusal = error as? AccountFailure { message = AccountRules.reserveRefusal(code: refusal.code) }
+                if submitted, !acknowledged, let refusal = error as? AccountFailure { message = AccountRules.reserveRefusal(code: refusal.code) }
                 else { message = submitted ? "预约结果不确定，请稍后刷新核对；不会自动重试" : safeMessage(error) }
             }
         }

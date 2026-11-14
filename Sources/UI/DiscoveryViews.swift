@@ -9,6 +9,10 @@ struct HomeView: View {
     @State private var guessPager: GuessPager?
     // 推荐 is the default channel and sits at the far right; the row opens scrolled to it.
     private let feeds = [("recommend", "热度精选"), ("latest", "最新短剧"), ("comic", "漫剧榜单"), ("guess", "推荐")]
+    private var gridDramas: [Drama] {
+        let featuredCount = model.theme == .warm ? 1 : model.theme == .cards ? 3 : 0
+        return Array(loader.dramas.dropFirst(featuredCount))
+    }
 
     var body: some View {
         Group {
@@ -46,7 +50,7 @@ struct HomeView: View {
                 feedSelector
                 if model.appearance == .cards && !loader.dramas.isEmpty { ranking }
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: model.appearance == .warm ? 104 : 145), spacing: 12)], alignment: .leading, spacing: 20) {
-                    ForEach(loader.dramas) { drama in NavigationLink { DetailView(drama: drama) } label: { DramaPoster(drama: drama) }.buttonStyle(.plain).onAppear { loader.itemAppeared(drama) { load() } } }
+                    ForEach(gridDramas) { drama in NavigationLink { DetailView(drama: drama) } label: { DramaPoster(drama: drama) }.buttonStyle(.plain).accessibilityIdentifier("home.grid.\(drama.id)").onAppear { loader.itemAppeared(drama) { load() } } }
                 }
                 if loader.dramas.isEmpty && !loader.isLoading && loader.error == nil { EmptyStateView(symbol: "sparkles.tv", title: "这一页暂时没有剧集", message: "可以刷新，或切换上方的内容类型。") }
                 LoadMoreView(loader: loader) { load(reset: loader.dramas.isEmpty) }
@@ -72,7 +76,7 @@ struct HomeView: View {
                     HStack { Text(drama.episodeCount > 0 ? "全 \(drama.episodeCount) 集" : "精彩短剧").font(.caption).foregroundStyle(.white.opacity(0.8)); Spacer(); Button { model.play(drama) } label: { Label("立即播放", systemImage: "play.fill").font(.caption.bold()).padding(.horizontal, 13).padding(.vertical, 10).background(.white, in: Capsule()).foregroundStyle(Color(hex: 0xA9341F)) }.buttonStyle(.plain) }
                 }.padding(18)
             }.frame(height: 210).clipShape(RoundedRectangle(cornerRadius: 20))
-        }.buttonStyle(.plain)
+        }.buttonStyle(.plain).accessibilityIdentifier("home.featured.\(drama.id)")
     }
 
     private var continueWatching: some View {
@@ -97,7 +101,7 @@ struct HomeView: View {
         VStack(alignment: .leading, spacing: 13) {
             SectionHeading(title: feed == "guess" ? "为你推荐" : "热度榜", subtitle: feed == "guess" ? "猜你喜欢" : "大家都在追")
             ForEach(Array(loader.dramas.prefix(3).enumerated()), id: \.element.id) { index, drama in
-                NavigationLink { DetailView(drama: drama) } label: { HStack(spacing: 12) { Text("\(index + 1)").font(.title2.bold().italic()).foregroundStyle(model.appearance.accent).frame(width: 24); Text(drama.title).font(.subheadline.weight(.medium)).foregroundStyle(model.appearance.ink).lineLimit(1); Spacer(); Image(systemName: "chevron.right").font(.caption).foregroundStyle(model.appearance.muted) }.frame(minHeight: 38).contentShape(Rectangle()) }.buttonStyle(.plain)
+                NavigationLink { DetailView(drama: drama) } label: { HStack(spacing: 12) { Text("\(index + 1)").font(.title2.bold().italic()).foregroundStyle(model.appearance.accent).frame(width: 24); Text(drama.title).font(.subheadline.weight(.medium)).foregroundStyle(model.appearance.ink).lineLimit(1); Spacer(); Image(systemName: "chevron.right").font(.caption).foregroundStyle(model.appearance.muted) }.frame(minHeight: 38).contentShape(Rectangle()) }.buttonStyle(.plain).accessibilityIdentifier("home.ranking.\(drama.id)")
             }
         }.padding(16).background(model.appearance.surface, in: RoundedRectangle(cornerRadius: 18))
     }
@@ -108,7 +112,7 @@ struct HomeView: View {
         // Signed in: the account's own feed; otherwise the anonymous one. A changed owner restarts the round.
         let owner = account.guessOwner
         let restart = reset || guessPager == nil || guessPager?.owner != owner
-        if restart { guessPager = GuessPager(owner: owner, previous: guessPager) { cursor in try await AccountService.shared.guessBatch(owner: owner, cursor: cursor) } }
+        if restart { guessPager = GuessPager(owner: owner, previous: guessPager, history: .shared, historyKey: account.guessHistoryKey) { cursor in try await AccountService.shared.guessBatch(owner: owner, cursor: cursor) } }
         guard let pager = guessPager else { return }
         loader.load(reset: restart) { _ in try await pager.next() }
     }

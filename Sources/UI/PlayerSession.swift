@@ -158,7 +158,7 @@ final class PlayerSession: ObservableObject {
     func toggle() { if finished { load(index: index, startAt: 0) } else if isPlaying || (player?.rate ?? 0) > 0 { pause() } else { endHold(); endMessage = nil; currentStream?.resume(); player?.playImmediately(atRate: app.speed) } }
     func pause() { endHold(); player?.pause(); currentStream?.pause(); isPlaying = false; saveProgress(flush: true) }
     /// A drag across the full width moves through the whole episode, or through this much of a longer one.
-    static let dragSeekSpan: Double = 180
+    nonisolated static let dragSeekSpan: Double = 180
     /// Where a sideways drag of `fraction` of the width (negative to the left) lands from `start`, held a second short of the end.
     nonisolated static func dragSeekTarget(start: Double, duration: Double, fraction: Double) -> Double {
         guard duration > 0 else { return start }

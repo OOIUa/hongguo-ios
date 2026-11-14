@@ -2,6 +2,7 @@
 """Generate the dependency-free Xcode project from checked-in source files."""
 import hashlib
 import json
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 root = Path(__file__).resolve().parent.parent
@@ -78,3 +79,56 @@ schemes.mkdir(parents=True, exist_ok=True)
  <AnalyzeAction buildConfiguration="Debug"/><ArchiveAction buildConfiguration="Release" revealArchiveInOrganizer="YES"/>
 </Scheme>''')
 print(f'Generated Hongguo.xcodeproj: {len(sources)} Swift sources, {len(resources)} resources')
+
+# QA uses exactly the same app objects, source list and Release.json settings.
+# Generate it here so new production files cannot silently disappear from UI test builds.
+qa_project = root / 'Hongguo-QA.xcodeproj'
+qa_project.mkdir(exist_ok=True)
+qa = dict(objects)
+qa_target, qa_product, qa_file, qa_build, qa_sources, qa_frameworks, qa_resources, qa_configs, dependency, proxy = [
+    uid('qa:' + name) for name in ('target', 'product', 'file', 'build', 'sources', 'frameworks', 'resources', 'configs', 'dependency', 'proxy')]
+qa[qa_product] = '{isa = PBXFileReference; explicitFileType = wrapper.cfbundle; path = HongguoQATests.xctest; sourceTree = BUILT_PRODUCTS_DIR; }'
+qa[qa_file] = '{isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Tests/UIQATests.swift; sourceTree = "<group>"; }'
+qa[qa_build] = f'{{isa = PBXBuildFile; fileRef = {qa_file}; }}'
+qa[qa_sources] = f'{{isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = ({qa_build},); runOnlyForDeploymentPostprocessing = 0; }}'
+for phase, kind in [(qa_frameworks, 'PBXFrameworksBuildPhase'), (qa_resources, 'PBXResourcesBuildPhase')]:
+    qa[phase] = f'{{isa = {kind}; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; }}'
+qa[products] = qa[products].replace(f'({product},)', f'({product},{qa_product},)')
+qa[group] = qa[group].replace(f'{products},)', f'{qa_file},{products},)')
+qa[proxy] = f'{{isa = PBXContainerItemProxy; containerPortal = {proj}; proxyType = 1; remoteGlobalIDString = {target}; remoteInfo = Hongguo; }}'
+qa[dependency] = f'{{isa = PBXTargetDependency; target = {target}; targetProxy = {proxy}; }}'
+qa_config_ids = []
+for config in ('Debug', 'Release'):
+    config_id = uid('qa:config:' + config)
+    qa_config_ids.append(config_id)
+    test_settings = {
+        'PRODUCT_NAME': 'HongguoQATests', 'PRODUCT_BUNDLE_IDENTIFIER': 'com.ooiua.hongguo.qa',
+        'GENERATE_INFOPLIST_FILE': 'YES', 'TEST_TARGET_NAME': 'Hongguo',
+        'CODE_SIGNING_ALLOWED': 'NO', 'CODE_SIGNING_REQUIRED': 'NO', 'CODE_SIGN_IDENTITY': '',
+        'SWIFT_VERSION': '5.0', 'IPHONEOS_DEPLOYMENT_TARGET': release['minimumOSVersion'],
+        'TARGETED_DEVICE_FAMILY': '1', 'SUPPORTED_PLATFORMS': 'iphoneos iphonesimulator',
+        'LD_RUNPATH_SEARCH_PATHS': '$(inherited) @executable_path/Frameworks @loader_path/Frameworks',
+    }
+    qa[config_id] = '{isa = XCBuildConfiguration; buildSettings = {' + ''.join(f'{k} = {quote(v)};' for k, v in test_settings.items()) + '}; name = ' + config + '; }'
+qa[qa_configs] = f'{{isa = XCConfigurationList; buildConfigurations = ({",".join(qa_config_ids)},); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; }}'
+qa[qa_target] = f'{{isa = PBXNativeTarget; buildConfigurationList = {qa_configs}; buildPhases = ({qa_sources},{qa_frameworks},{qa_resources},); buildRules = (); dependencies = ({dependency},); name = HongguoQATests; productName = HongguoQATests; productReference = {qa_product}; productType = "com.apple.product-type.bundle.ui-testing"; }}'
+qa[proj] = qa[proj].replace(f'targets = ({target},)', f'targets = ({target},{qa_target},)')
+qa_body = '\n'.join(f'{key} = {value};' for key, value in sorted(qa.items()))
+(qa_project / 'project.pbxproj').write_text('// !$*UTF8*$!\n{archiveVersion = 1; classes = {}; objectVersion = 56; objects = {\n' + qa_body + '\n}; rootObject = ' + proj + '; }\n')
+qa_scheme = ET.parse(schemes / 'Hongguo.xcscheme')
+for reference in qa_scheme.iter('BuildableReference'):
+    reference.set('ReferencedContainer', 'container:Hongguo-QA.xcodeproj')
+def test_reference(parent):
+    ET.SubElement(parent, 'BuildableReference', BuildableIdentifier='primary', BlueprintIdentifier=qa_target,
+                  BuildableName='HongguoQATests.xctest', BlueprintName='HongguoQATests', ReferencedContainer='container:Hongguo-QA.xcodeproj')
+build_entry = ET.SubElement(qa_scheme.find('BuildAction/BuildActionEntries'), 'BuildActionEntry',
+                           buildForTesting='YES', buildForRunning='NO', buildForProfiling='NO', buildForArchiving='NO', buildForAnalyzing='YES')
+test_reference(build_entry)
+test_action = ET.Element('TestAction', buildConfiguration='Debug', selectedDebuggerIdentifier='Xcode.DebuggerFoundation.Debugger.LLDB',
+                        selectedLauncherIdentifier='Xcode.IDEFoundation.Launcher.LLDB', shouldUseLaunchSchemeArgsEnv='YES')
+test_reference(ET.SubElement(ET.SubElement(test_action, 'Testables'), 'TestableReference', skipped='NO'))
+qa_scheme.getroot().insert(1, test_action)
+qa_scheme_dir = qa_project / 'xcshareddata' / 'xcschemes'
+qa_scheme_dir.mkdir(parents=True, exist_ok=True)
+qa_scheme.write(qa_scheme_dir / 'HongguoQA.xcscheme', encoding='utf-8', xml_declaration=True)
+print('Generated Hongguo-QA.xcodeproj with the same app sources and version')

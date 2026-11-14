@@ -138,6 +138,14 @@ private func fixtureEpisode(_ number: Int = 1) -> Episode {
             try expect(store.favorites.isEmpty && store.history.isEmpty && store.storageError != nil, "Corrupt or oversized library should fail closed without a crash")
             let preserved = try Data(contentsOf: url)
             try expect(preserved == bytes, "Original corrupt file must remain available for recovery")
+            store.flush()
+            store.toggleFavorite(fixtureDrama(5000))
+            store.record(drama: fixtureDrama(5000), episode: fixtureEpisode(), position: 10)
+            store.clearHistory(); store.clearFavorites(); store.flush()
+            let afterFlush = try Data(contentsOf: url)
+            try expect(afterFlush == bytes, "Flush or later mutations overwrote an unreadable library")
+            try expect(store.storageLocked && store.storageError != nil && store.favorites.isEmpty && store.history.isEmpty,
+                       "Failed loads must keep writes locked and the recovery warning visible")
         }
         // Exercise normalization of duplicate IDs and invalid negative positions on load.
         let valid = LibraryEntry(drama: fixtureDrama(4000), episodeID: fixtureEpisode().id, episodeIndex: 1, position: 3, updatedAt: Date(timeIntervalSince1970: 30))
@@ -149,6 +157,15 @@ private func fixtureEpisode(_ number: Int = 1) -> Episode {
         let normalized = LibraryStore(directory: root)
         try expect(normalized.storageError == nil && normalized.favorites.count == 1 && normalized.history.count == 1 && normalized.history[0].position == 3,
                    "Persisted duplicate/invalid entries must normalize to the latest valid record")
+        try Data("{temporarily-unreadable".utf8).write(to: url)
+        normalized.reload()
+        try expect(normalized.storageLocked && normalized.history.count == 1, "Reload failure must preserve the last valid in-memory library")
+        try JSONEncoder().encode(Snapshot(favorites: [valid], history: [valid])).write(to: url)
+        normalized.reload()
+        try expect(!normalized.storageLocked && normalized.storageError == nil && normalized.history.count == 1, "Successful retry must restore writes")
+        normalized.updatePosition(dramaID: valid.id, episodeID: valid.episodeID, position: 12)
+        normalized.flush()
+        try expect(LibraryStore(directory: root).history.first?.position == 12, "Recovered library did not resume persistence")
     }
 
     private static func cryptoVectorsAndRoundTrips() throws {
