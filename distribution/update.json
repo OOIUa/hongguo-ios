@@ -1,19 +1,18 @@
 {
-  "version": "0.1.25",
-  "build": 26,
+  "version": "0.1.26",
+  "build": 27,
   "minimumOSVersion": "17.0",
   "releaseNotes": [
-    "修复推荐页重复：按匿名与不同账号保存最近 540 部推荐，重开应用后继续去重。",
-    "修复首页顶部推荐与下方海报网格重复展示，以及漫剧榜单续页重复。",
-    "本机片单读取失败时保留原数据、暂停写入，可重试读取，避免空记录覆盖。",
-    "修复预约成功后的回读失败被误报为「未写入账号」。"
+    "改善偶发播放空响应：优先恢复单集取流，并复用成功的匿名播放身份。",
+    "播放服务明确拒绝时停止重复请求，保留取消操作与时间预算约束。",
+    "修复并发旧请求误清新播放身份，减少切集时重复注册。"
   ],
-  "publishedAt": "2026-11-14T07:15:11Z",
-  "downloadURL": "https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.25/Hongguo-iOS-0.1.25-unsigned.ipa",
-  "sha256": "dd80490fcfc3df77c1da9c5c2c80c65ef25d1bf02b58b7974cc408f7dbe930c6",
-  "size": 1843573,
+  "publishedAt": "2026-11-15T17:07:51Z",
+  "downloadURL": "https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.26/Hongguo-iOS-0.1.26-unsigned.ipa",
+  "sha256": "3b0dac29cd346a5cd0bbef9eb6e78f88016d9c5913ed9762d6ff08bc7cdfa36a",
+  "size": 1856852,
   "mirrors": {
-    "gh-proxy": "https://gh-proxy.com/https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.25/Hongguo-iOS-0.1.25-unsigned.ipa",
-    "ghfast": "https://ghfast.top/https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.25/Hongguo-iOS-0.1.25-unsigned.ipa"
+    "gh-proxy": "https://gh-proxy.com/https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.26/Hongguo-iOS-0.1.26-unsigned.ipa",
+    "ghfast": "https://ghfast.top/https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.26/Hongguo-iOS-0.1.26-unsigned.ipa"
   }
 }
