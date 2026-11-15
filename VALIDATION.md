@@ -1,5 +1,15 @@
 # iOS 验证记录
 
+## 0.1.26 / build 27：播放空响应恢复（2026-11-16）
+
+- 参考 LiuWQ0809/hongguo-android `89169c0` 及前置提交，单集接口空响应先做有限恢复（300ms 等待、最多 5 次），再走既有兼容路径。仅缓存已返回可用轨道的匿名身份，与账号及推荐身份分离；旧失败不能清除或覆盖另一个请求的新成功身份。
+- HTTP 403/429 与已识别的登录/风控业务拒绝停止后续请求；保留模型错误优先级。注册前开始计算 20 秒请求启动预算，不会在预算耗尽后启动新请求；已发出的 HTTP 请求仍由各自超时约束，不宣称严格截断在 20 秒。取消等待、注册与取流均停止本次后续操作。
+- `scripts/test-network.sh` 通过，新增恢复检查覆盖复用、换新、次数上限、拒绝、预算、取消和 actor 重入期间的旧请求失败；原签名向量、模型/ByteVC2 与旧路径回归通过。
+- `scripts/test-progressive.sh` 通过，包含真实 AVPlayer 首帧、未缓存位置跳转、暂停恢复、取消和范围数据校验。
+- `scripts/test-progressive-live.sh --live` 匿名实网通过：加密分集共 22,013,835 字节，首帧时仅下载 524,288 字节（约 2.4%）；解码 75 帧视频与 22 个音频缓冲。
+- Xcode 27.2 / iOS SDK 27.2，关闭全部签名的 iPhone Release 目标编译通过，产物在 `build/playback-device/`。本轮按 0.1.26 / build 27 交付新的无签名 IPA，实际发布状态见 GitHub Release 与稳定更新清单；未做 iPhone 真机验收。
+- 日志：`/tmp/hongguo-playback-ios-network.log`、`/tmp/hongguo-playback-ios-progressive.log`、`/tmp/hongguo-playback-ios-live.log`、`/tmp/hongguo-playback-ios-device-build.log`。
+
 ## 0.1.25 / build 26：推荐去重、漫剧续页与数据保护
 
 日期：2026-11-14。版本 0.1.25 / build 26。本轮按无签名 iPhone IPA 发布，实际发布状态与安装包校验信息见 GitHub Release 及稳定更新清单。

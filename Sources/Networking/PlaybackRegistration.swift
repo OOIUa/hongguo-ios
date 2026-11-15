@@ -3,7 +3,7 @@
 // jackotom/hongguo-drama 5febca2, sunnysky123/hongguo-web 79babdf.
 import Foundation
 
-struct RegisteredIdentity: Sendable {
+struct RegisteredIdentity: Sendable, Equatable {
     let deviceID: String
     let installID: String
     let cdid: String

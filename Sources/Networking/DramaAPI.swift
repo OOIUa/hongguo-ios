@@ -21,6 +21,7 @@ actor DramaAPI {
     private var searchCursors: [String: SearchCursor] = [:]
     private(set) var lastPlaybackTrace = ""
     private var registrationFailedAt: Date?
+    private var successfulPlaybackIdentity: RegisteredIdentity?
     private var relatedCache: [String: [RelatedWork]] = [:]
     private var releaseCache: [String: String] = [:]
     private let suggestionWebID = UUID().uuidString.lowercased()
@@ -422,84 +423,111 @@ actor DramaAPI {
         while detailOrder.count > 80 { let oldest = detailOrder.removeFirst(); detailCache.removeValue(forKey: oldest); detailExpiry.removeValue(forKey: oldest) }
     }
 
-    /// Registers a new anonymous identity. Identities may be single-use, so every model request gets its own
-    /// (synchronized from hongguo-drama 5.5). A failure is reused for 10 seconds to prevent a registration storm.
+    /// Fresh anonymous identity for an uncached or empty-response attempt; account devices stay separate.
     private func freshPlaybackIdentity() async throws -> RegisteredIdentity {
         if let failed = registrationFailedAt, Date().timeIntervalSince(failed) < 10 { throw HGError.message("匿名播放设备注册失败，请稍后重试") }
         do { let identity = try await PlaybackRegistration.register(session: session); registrationFailedAt = nil; return identity }
-        catch { if !(error is CancellationError) { registrationFailedAt = Date() }; throw error }
+        catch { try Task.checkCancellation(); if !(error is CancellationError) { registrationFailedAt = Date() }; throw error }
     }
 
     static let playbackHost = "api5-normal-sinfonlineb.fqnovel.com", playbackRetryHost = "api5-normal-hl.fqnovel.com"
     private static let tabVideoPath = "/reading/bookapi/video_tab/multi_video_model/v1/", postVideoPath = "/novel/player/multi_video_model/v1/"
 
-    /// The model endpoints answer an unsigned request with 0 bytes since 2026-11-05, and a signed POST without the
-    /// registration cookie or x-ss-stub is rejected too (hongguoTV 0.1.22-0.1.25). A signed read still comes back empty
-    /// now and then depending on identity and path, and a new identity usually recovers, so the plan is: the official
-    /// GET, then POST, then a new identity on GET and on the alternate host. The whole read is bounded.
-    /// Identities and routes do not always answer with the same model (2026-11-09: GET sometimes gave only keyless inline
-    /// rows for an episode whose POST gave a full 1080P), so a model that yields no track moves on to the next route too.
-    /// Only after every route fails is the model error reported, ahead of HTTP or empty-response errors.
-    /// Since 2026-11-11 every multi-episode route answers 0 bytes, so the fully signed single-episode endpoint
-    /// (`single`) goes first with the same identity; the old routes follow in their usual order when it fails.
+    /// Recover empty single-endpoint replies before compatibility routes (LiuWQ0809 89169c0).
+    /// Reuse only proven anonymous identities; retain cancellation, route order and model-error precedence.
     func playbackTrack(routes: [PlaybackRoute] = DramaAPI.playbackRoutes, budget: TimeInterval = 20,
+                       now: @Sendable () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
+                       pause: @Sendable () async throws -> Void = { try await Task.sleep(nanoseconds: 300_000_000) },
                        identity newIdentity: @Sendable () async throws -> RegisteredIdentity,
                        single: (@Sendable (RegisteredIdentity) async throws -> PlaybackRead)? = nil,
                        read: @Sendable (PlaybackRoute, RegisteredIdentity) async throws -> PlaybackRead,
                        use: @Sendable ([String: Any]) async throws -> VideoTrack) async throws -> VideoTrack {
-        var identity = try await newIdentity()
+        let started = now()
+        try Task.checkCancellation()
+        guard budget > 0 else { throw HGError.message("播放取流超时，请稍后重试") }
+        var identity: RegisteredIdentity
+        if let cached = successfulPlaybackIdentity { identity = cached }
+        else { identity = try await newIdentity() }
         var trace: [String] = []
         var failure: Error?, modelFailure: Error?
         var onlyEmpty = true
-        let started = Date()
         defer { lastPlaybackTrace = trace.joined(separator: " ") }
         if let single {
-            var model: [String: Any]?
-            do {
-                switch try await single(identity) {
-                case .empty: trace.append("S=0B")
-                case .invalid: trace.append("S=invalid"); onlyEmpty = false
-                case .model(let value): model = value
-                }
-            } catch is CancellationError { throw CancellationError()
-            } catch { trace.append("S=failed"); onlyEmpty = false; failure = error }
-            if let model {
-                onlyEmpty = false
+            for attempt in 0..<5 {
+                try Task.checkCancellation()
+                guard now() - started < budget else { break }
+                var model: [String: Any]?
                 do {
-                    let track = try await use(model)
-                    trace.append("S=ok")
-                    return track
+                    switch try await single(identity) {
+                    case .empty:
+                        trace.append("S=0B"); forgetPlaybackIdentity(identity)
+                        guard attempt < 4, now() - started < budget else { break }
+                        try await pause()
+                        try Task.checkCancellation()
+                        guard now() - started < budget else { break }
+                        do { identity = try await newIdentity(); trace.append("new") }
+                        catch { try Task.checkCancellation(); failure = error; trace.append("new=failed"); break }
+                        continue
+                    case .invalid: trace.append("S=invalid"); onlyEmpty = false
+                    case .model(let value): model = value
+                    }
                 } catch is CancellationError { throw CancellationError()
-                } catch {
-                    try Task.checkCancellation()
-                    trace.append("S=unusable")
-                    modelFailure = error
+                } catch let error as PlaybackRefusal {
+                    forgetPlaybackIdentity(identity); trace.append("S=rejected"); throw error
+                } catch { try Task.checkCancellation(); trace.append("S=failed"); onlyEmpty = false; failure = error }
+                if let model {
+                    onlyEmpty = false
+                    do {
+                        let track = try await use(model)
+                        try Task.checkCancellation()
+                        if successfulPlaybackIdentity == nil { successfulPlaybackIdentity = identity }
+                        trace.append("S=ok")
+                        return track
+                    } catch is CancellationError { throw CancellationError()
+                    } catch let error as PlaybackRefusal { forgetPlaybackIdentity(identity); throw error
+                    } catch {
+                        try Task.checkCancellation()
+                        trace.append("S=unusable")
+                        modelFailure = error
+                    }
                 }
+                break // Only an empty reply repeats the single endpoint.
             }
         }
         for route in routes {
-            guard Date().timeIntervalSince(started) < budget else { break }
+            guard now() - started < budget else { break }
             try Task.checkCancellation()
-            if route.renewsIdentity, let renewed = try? await newIdentity() { identity = renewed; trace.append("new") }
+            if route.renewsIdentity {
+                do { identity = try await newIdentity(); trace.append("new") }
+                catch { try Task.checkCancellation(); trace.append("new=failed") }
+            }
+            try Task.checkCancellation()
+            guard now() - started < budget else { break }
             let label = (route.post ? "P:" : "G:") + (route.host == Self.playbackHost ? "b" : "hl")
             let model: [String: Any]
             do {
                 switch try await read(route, identity) {
-                case .empty: trace.append(label + "=0B"); continue
+                case .empty: trace.append(label + "=0B"); forgetPlaybackIdentity(identity); continue
                 case .invalid: trace.append(label + "=invalid"); onlyEmpty = false; continue
                 case .model(let value): model = value
                 }
             } catch is CancellationError { throw CancellationError()
+            } catch let error as PlaybackRefusal {
+                forgetPlaybackIdentity(identity); trace.append(label + "=rejected"); throw error
             } catch let error as HGError {
-                if case .message(let text) = error, text == Self.rejectedPlayback { trace.append(label + "=rejected"); throw error }
+                try Task.checkCancellation()
+                if case .message(let text) = error, text == Self.rejectedPlayback { forgetPlaybackIdentity(identity); trace.append(label + "=rejected"); throw error }
                 trace.append(label + "=failed"); onlyEmpty = false; failure = error; continue
-            } catch { trace.append(label + "=failed"); onlyEmpty = false; failure = error; continue }
+            } catch { try Task.checkCancellation(); trace.append(label + "=failed"); onlyEmpty = false; failure = error; continue }
             onlyEmpty = false
             do {
                 let track = try await use(model)
+                try Task.checkCancellation()
+                if successfulPlaybackIdentity == nil { successfulPlaybackIdentity = identity }
                 trace.append(label + "=ok")
                 return track
             } catch is CancellationError { throw CancellationError()
+            } catch let error as PlaybackRefusal { forgetPlaybackIdentity(identity); throw error
             } catch {
                 try Task.checkCancellation()
                 trace.append(label + "=unusable")
@@ -511,14 +539,31 @@ actor DramaAPI {
         throw failure ?? HGError.message("服务暂未返回当前分集片源")
     }
 
+    private func forgetPlaybackIdentity(_ identity: RegisteredIdentity) {
+        if successfulPlaybackIdentity == identity { successfulPlaybackIdentity = nil }
+    }
+
+    struct PlaybackRefusal: LocalizedError {
+        let errorDescription: String?
+        init(http: Int) { errorDescription = "播放服务拒绝请求（HTTP \(http)）" }
+        init(code: Int) { errorDescription = "播放服务拒绝请求（错误码 \(code)），请稍后重试" }
+    }
+
+    static func checkPlaybackBusinessRejection(_ data: Data) throws {
+        guard let reply = try? ProtocolJSON.object(data) else { return }
+        let code = ProtocolJSON.integer(reply["code"] ?? reply["Code"])
+        if [1003, 101144, 110001, 110002].contains(code) { throw PlaybackRefusal(code: code) }
+    }
+
     /// One route's answer: a model, 0 bytes, or a body that is not a usable model response.
     enum PlaybackRead { case model([String: Any]), empty, invalid }
     private static let rejectedPlayback = "当前分集暂未提供播放信息"
 
     private func readPlaybackRoute(_ route: PlaybackRoute, episodeID: String, body: Data, identity: RegisteredIdentity) async throws -> PlaybackRead {
         let signed = try await signedPlaybackRequest(route: route, episodeID: episodeID, body: body, identity: identity)
-        let data = try await fetch(url: signed.url, body: route.post ? body : nil, headers: signed.headers, timeout: 8)
+        let data = try await fetch(url: signed.url, body: route.post ? body : nil, headers: signed.headers, timeout: 8, playback: true)
         guard !data.isEmpty else { return .empty }
+        try Self.checkPlaybackBusinessRejection(data)
         if !route.post { return Self.tabVideoModel(data, episodeID: episodeID).map { .model($0) } ?? .invalid }
         guard let response = try? ProtocolJSON.object(data) else { return .invalid }
         guard ProtocolJSON.integer(response["code"] ?? response["Code"]) == 0 else { throw HGError.message(Self.rejectedPlayback) }
@@ -540,8 +585,9 @@ actor DramaAPI {
         var headers = ["User-Agent":Self.singleUserAgent, "Accept":"application/json", "Content-Type":"application/json; charset=utf-8",
                        "x-xs-from-web":"0", "sdk-version":"2"]
         headers.merge(try PlayerSign.headers(query: query, body: body, nowMs: now, deviceID: identity.deviceID)) { $1 }
-        let data = try await fetch(url: url, body: body, headers: headers, timeout: 8)
+        let data = try await fetch(url: url, body: body, headers: headers, timeout: 8, playback: true)
         guard !data.isEmpty else { return .empty }
+        try Self.checkPlaybackBusinessRejection(data)
         return Self.singleVideoModel(data).map { .model($0) } ?? .invalid
     }
 
@@ -678,7 +724,7 @@ actor DramaAPI {
         guard !data.isEmpty else { throw HGError.message("服务返回空响应，请稍后重试") }
         do { return try ProtocolJSON.object(data) } catch { throw HGError.message("服务数据格式发生变化，请稍后重试") }
     }
-    private func fetch(url: URL, body: Data? = nil, headers: [String: String], timeout: TimeInterval = 18) async throws -> Data {
+    private func fetch(url: URL, body: Data? = nil, headers: [String: String], timeout: TimeInterval = 18, playback: Bool = false) async throws -> Data {
         try Task.checkCancellation()
         let scheduled = max(Date(), nextRequestAt); nextRequestAt = scheduled.addingTimeInterval(0.26)
         let wait = scheduled.timeIntervalSinceNow
@@ -689,6 +735,7 @@ actor DramaAPI {
         for (name,value) in headers { request.setValue(value, forHTTPHeaderField: name) }
         let (data,response) = try await session.data(for: request)
         try Task.checkCancellation()
+        if playback, let http = response as? HTTPURLResponse, [403,429].contains(http.statusCode) { throw PlaybackRefusal(http: http.statusCode) }
         guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
             throw HGError.message("服务连接失败（HTTP \((response as? HTTPURLResponse)?.statusCode ?? 0)）")
         }

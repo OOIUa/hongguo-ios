@@ -438,8 +438,9 @@ import JavaScriptCore
         precondition(routeTrace == "G:b=unusable P:b=ok", routeTrace)
         // Every route failing: the model error is reported ahead of HTTP and empty-response errors.
         let allCalls = RouteCalls()
+        let allAPI = DramaAPI(resourceDirectory: resources)
         do {
-            _ = try await trackAPI.playbackTrack(identity: { allCalls.identities += 1; return routeIdentity },
+            _ = try await allAPI.playbackTrack(identity: { allCalls.identities += 1; return routeIdentity },
                 read: { route, _ in
                     allCalls.routes.append(route)
                     if route.post { if route.host == DramaAPI.playbackHost { return .empty }; throw URLError(.timedOut) }
@@ -479,20 +480,21 @@ import JavaScriptCore
         precondition(mapTrack.url.absoluteString == "https://v1.qznovelvod.com/map.mp4")
         // The single endpoint goes first with the route identity; a usable model ends the fetch without old routes.
         let singleCalls = RouteCalls()
-        let singleTrack = try await trackAPI.playbackTrack(identity: { singleCalls.identities += 1; return routeIdentity },
+        let singleAPI = DramaAPI(resourceDirectory: resources)
+        let singleTrack = try await singleAPI.playbackTrack(identity: { singleCalls.identities += 1; return routeIdentity },
             single: { identity in precondition(identity.deviceID == routeIdentity.deviceID); return .model(keyedModel) },
             read: { route, _ in singleCalls.routes.append(route); return .empty }, use: { try await trackAPI.modelTrack($0) })
         precondition(singleTrack.url.absoluteString == "https://v1.qznovelvod.com/keyed.mp4" && singleCalls.routes.isEmpty && singleCalls.identities == 1)
-        let singleTrace = await trackAPI.lastPlaybackTrace
+        let singleTrace = await singleAPI.lastPlaybackTrace
         precondition(singleTrace == "S=ok", singleTrace)
         // An empty single answer falls through to the old routes in their usual order.
         let fallCalls = RouteCalls()
-        let fellBack = try await trackAPI.playbackTrack(identity: { routeIdentity }, single: { _ in .empty },
+        let fellBack = try await trackAPI.playbackTrack(pause: {}, identity: { routeIdentity }, single: { _ in .empty },
             read: { route, _ in fallCalls.routes.append(route); return .model(route.post ? keyedModel : keylessModel) },
             use: { try await trackAPI.modelTrack($0) })
         precondition(fellBack.url.absoluteString == "https://v1.qznovelvod.com/keyed.mp4" && fallCalls.routes == Array(DramaAPI.playbackRoutes.prefix(2)))
         let fallTrace = await trackAPI.lastPlaybackTrace
-        precondition(fallTrace == "S=0B G:b=unusable P:b=ok", fallTrace)
+        precondition(fallTrace.components(separatedBy: "S=0B").count - 1 == 5 && fallTrace.hasSuffix("G:b=unusable P:b=ok"), fallTrace)
         // A single model that yields no track is reported ahead of empty old routes.
         do {
             _ = try await trackAPI.playbackTrack(identity: { routeIdentity }, single: { _ in .model(keylessModel) },
@@ -515,6 +517,7 @@ import JavaScriptCore
             fatalError("Rejected episodes must fail")
         } catch { precondition(error.localizedDescription == "当前分集暂未提供播放信息" && rejectCalls.routes.count == 1) }
         print("PASS: video_tab playback model request and parsing.")
+        try await playbackRecoveryChecks(resources: resources)
         print("PASS: 4 original Node signing vectors; exact 20/30-digit IDs; numeric-token parsing; binary/gzip body digest; URL spaces; cancelled query rejects before HTTP.")
     }
 }
