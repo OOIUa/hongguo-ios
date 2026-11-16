@@ -11,6 +11,8 @@
 - Xcode 27.2 / SDK 27.2，无签名 iPhone arm64 Release 构建与 IPA 校验通过。发布仅包含本次播放修复；工作区待发布的账号资料补齐改动未合入。未做实体 iPhone 安装验收。
 - 日志 `/tmp/hongguo-v5-ios-*.log`；UI 结果 `build/v5-qa/Logs/Test/Test-HongguoQA-2026.11.16_22-35-01-+0800.xcresult`。线上发布和四份稳定清单以 GitHub Release / distribution 为准。
 
+- 发布完成：GitHub `v0.1.27`，无签名 IPA 1,864,015 字节，SHA-256 `faae18e097cacc21fd991b6372a1ef2d65c7ad7c49721f9018e0b9479ac366d4`。三条全能签源和应用更新清单由 `5a13d71` 同步；官方及两条代理的清单和完整 IPA 均验证大小/哈希一致，生产更新客户端实际下载校验通过。线上报告 `build/online-0.1.27-verification.json`。
+
 ## 0.1.26 / build 27：播放空响应恢复（2026-11-16）
 
 - 参考 LiuWQ0809/hongguo-android `89169c0` 及前置提交，单集接口空响应先做有限恢复（300ms 等待、最多 5 次），再走既有兼容路径。仅缓存已返回可用轨道的匿名身份，与账号及推荐身份分离；旧失败不能清除或覆盖另一个请求的新成功身份。
