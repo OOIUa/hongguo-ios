@@ -3,24 +3,24 @@
   "message": "项目维护者发布的未签名 IPA；需要自行签名安装。加速服务由第三方提供。",
   "identifier": "ooiua.hongguo-ios.source-cn-backup",
   "sourceURL": "https://ghfast.top/https://raw.githubusercontent.com/OOIUa/hongguo-ios/main/distribution/source-cn-backup.json",
-  "sourceicon": "https://ghfast.top/https://raw.githubusercontent.com/OOIUa/hongguo-ios/v0.1.26/distribution/icon.png",
+  "sourceicon": "https://ghfast.top/https://raw.githubusercontent.com/OOIUa/hongguo-ios/v0.1.27/distribution/icon.png",
   "apps": [
     {
       "name": "红果独立版",
       "type": "1",
       "bundleIdentifier": "com.ooiua.hongguo.ios",
-      "version": "0.1.26",
-      "build": 27,
+      "version": "0.1.27",
+      "build": 28,
       "minimumOSVersion": "17.0",
-      "versionDate": "2026-11-15T17:07:51Z",
-      "versionDescription": "改善偶发播放空响应：优先恢复单集取流，并复用成功的匿名播放身份。\n播放服务明确拒绝时停止重复请求，保留取消操作与时间预算约束。\n修复并发旧请求误清新播放身份，减少切集时重复注册。\n未签名 IPA，需使用本人的证书签名后安装。",
+      "versionDate": "2026-11-16T14:42:27Z",
+      "versionDescription": "修复播放接口空响应：接入新版 v5 本机签名与压缩模型请求。\n调整设备能力声明，改善部分剧集只有不兼容编码而无法播放的问题。\n保留匿名身份复用、旧接口回退、明确拒绝与取消保护。\n未签名 IPA，需使用本人的证书签名后安装。",
       "lock": "0",
-      "downloadURL": "https://ghfast.top/https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.26/Hongguo-iOS-0.1.26-unsigned.ipa",
+      "downloadURL": "https://ghfast.top/https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.27/Hongguo-iOS-0.1.27-unsigned.ipa",
       "isLanZouCloud": "0",
-      "iconURL": "https://ghfast.top/https://raw.githubusercontent.com/OOIUa/hongguo-ios/v0.1.26/distribution/icon.png",
+      "iconURL": "https://ghfast.top/https://raw.githubusercontent.com/OOIUa/hongguo-ios/v0.1.27/distribution/icon.png",
       "tintColor": "E8463F",
-      "size": "1856852",
-      "sha256": "3b0dac29cd346a5cd0bbef9eb6e78f88016d9c5913ed9762d6ff08bc7cdfa36a"
+      "size": "1864015",
+      "sha256": "faae18e097cacc21fd991b6372a1ef2d65c7ad7c49721f9018e0b9479ac366d4"
     }
   ]
 }
