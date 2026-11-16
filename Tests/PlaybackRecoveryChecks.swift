@@ -12,6 +12,35 @@ func playbackRecoveryChecks(resources: URL) async throws {
     }
     let model: [String: Any] = ["fixture":true]
     let track = VideoTrack(url: URL(string: "https://v1.qznovelvod.com/recovery.mp4")!, spadeA: "", encrypted: false, definition: "720p")
+    let mobileAPI = DramaAPI(resourceDirectory: resources), mobileCalls = Calls()
+    _ = try await mobileAPI.playbackTrack(pause: {}, identity: { mobileCalls.identity() },
+        mobile: { _ in mobileCalls.singles += 1; return .model(model) },
+        single: { _ in fatalError("Successful v5 must skip old single endpoint") },
+        read: { _,_ in fatalError("Successful v5 must skip compatibility endpoints") }, use: { _ in track })
+    precondition(mobileCalls.singles == 1)
+    let mobileTrace = await mobileAPI.lastPlaybackTrace
+    precondition(mobileTrace == "M=ok")
+    let fallbackAPI = DramaAPI(resourceDirectory: resources), mobileFallback = Calls()
+    _ = try await fallbackAPI.playbackTrack(pause: {}, identity: { mobileFallback.identity() },
+        mobile: { _ in mobileFallback.singles += 1; return .empty },
+        single: { _ in mobileFallback.legacy += 1; return .model(model) },
+        read: { _,_ in fatalError("Old single recovery must precede compatibility endpoints") }, use: { _ in track })
+    precondition(mobileFallback.singles == 5 && mobileFallback.legacy == 1)
+    let refusedMobile = DramaAPI(resourceDirectory: resources)
+    do {
+        _ = try await refusedMobile.playbackTrack(identity: { mobileFallback.identity() },
+            mobile: { _ in throw DramaAPI.PlaybackRefusal(http: 403) },
+            single: { _ in fatalError("v5 refusal must stop old endpoint") },
+            read: { _,_ in fatalError("v5 refusal must stop compatibility endpoints") }, use: { _ in track })
+        fatalError("v5 refusal ignored")
+    } catch is DramaAPI.PlaybackRefusal { }
+    let modelPriority = DramaAPI(resourceDirectory: resources)
+    do {
+        _ = try await modelPriority.playbackTrack(identity: { mobileFallback.identity() }, mobile: { _ in .invalid },
+            single: { _ in .model(model) }, read: { _,_ in throw HGError.message("transport marker") },
+            use: { _ in throw HGError.message("model marker") })
+        fatalError("Invalid model accepted")
+    } catch { precondition(error.localizedDescription == "model marker") }
     let reuse = DramaAPI(resourceDirectory: resources), calls = Calls()
     for _ in 0..<2 {
         _ = try await reuse.playbackTrack(pause: {}, identity: { calls.identity() }, single: {

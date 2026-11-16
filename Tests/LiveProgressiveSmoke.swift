@@ -19,9 +19,11 @@ import CoreVideo
             guard let drama = page.dramas.first else { throw MediaError.unavailable }
             let detail = try await api.detail(drama: drama)
             guard let episode = detail.episodes.first else { throw MediaError.unavailable }
-            let track = try await api.track(episodeID: episode.id)
+            let requested = CommandLine.arguments.first(where: { $0.hasPrefix("--episode=") })?.dropFirst("--episode=".count).description ?? episode.id
+            let track = try await api.track(episodeID: requested)
+            print("playback_trace=\(await api.lastPlaybackTrace)")
             stage = "range-index"
-            let source = try await ProgressiveSource.open(track: track, episodeID: episode.id, cache: ProgressiveCache(root: cacheRoot))
+            let source = try await ProgressiveSource.open(track: track, episodeID: requested, cache: ProgressiveCache(root: cacheRoot))
             playback = await ProgressivePlayback.make(source: source)
             guard let playback else { throw MediaError.unavailable }
             let initial = await source.metrics()

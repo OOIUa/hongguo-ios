@@ -31,7 +31,7 @@ actor ProtocolSigner {
         let random: @convention(block) (Int) -> String = { HGCrypto.random(min(4096, max(0, $0))).hexString }
         runtime.setObject(hash, forKeyedSubscript: "__hgHash" as NSString)
         runtime.setObject(random, forKeyedSubscript: "__hgRandom" as NSString)
-        for name in ["BufferRuntime", "PureSign"] {
+        for name in ["BufferRuntime", "PureSign", "PlayerSignV5"] {
             let path = resourceDirectory?.appendingPathComponent(name + ".js") ?? Bundle.main.url(forResource: name, withExtension: "js")
             guard let path, let script = try? String(contentsOf: path, encoding: .utf8) else {
                 throw HGError.message("本机协议资源缺失，请重新安装")
@@ -60,6 +60,19 @@ actor ProtocolSigner {
         runtime.exception = nil
         let arguments: [Any] = [baseURL, try jsonString(query), body?.base64EncodedString() as Any? ?? NSNull(), try jsonString(device)]
         guard let text = runtime.objectForKeyedSubscript("hgSignedRequest")?.call(withArguments: arguments)?.toString(),
+              runtime.exception == nil,
+              let data = text.data(using: .utf8), let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let address = object["url"] as? String, let url = URL(string: address),
+              let headers = object["headers"] as? [String: String] else { throw HGError.message("无法生成本机请求签名") }
+        return SignedProtocolRequest(url: url, headers: headers)
+    }
+
+    func signedPlaybackV5(baseURL: String, query: [[String]], body: Data, device: [String: String], now: Int64) throws -> SignedProtocolRequest {
+        try Task.checkCancellation()
+        let runtime = try runtime()
+        runtime.exception = nil
+        let arguments: [Any] = [baseURL, try jsonString(query), body.base64EncodedString(), try jsonString(device), now]
+        guard let text = runtime.objectForKeyedSubscript("hgSignedPlaybackV5")?.call(withArguments: arguments)?.toString(),
               runtime.exception == nil,
               let data = text.data(using: .utf8), let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               let address = object["url"] as? String, let url = URL(string: address),

@@ -31,7 +31,7 @@ with zipfile.ZipFile(ipa) as archive:
     # Older SDKs get classic letterboxing on the iPhone Duo inner display.
     sdk = info.get('DTPlatformVersion', '0')
     assert version_tuple(sdk) >= version_tuple(release['minimumBuildSDK']), f'Built with iOS SDK {sdk}; iPhone Duo needs {release["minimumBuildSDK"]} or later'
-    assert prefix + 'PureSign.js' in names and prefix + 'BufferRuntime.js' in names
+    assert all(prefix + name in names for name in ['PureSign.js', 'BufferRuntime.js', 'PlayerSignV5.js'])
     assert prefix + 'Assets.car' in names
     assert not any(name.endswith('embedded.mobileprovision') for name in names)
     binary = archive.read(prefix + info['CFBundleExecutable'])

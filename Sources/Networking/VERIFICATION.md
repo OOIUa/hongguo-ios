@@ -44,3 +44,21 @@ This is fully offline. It checks the four pinned Node signing outputs in JavaScr
 The 2026-11-16 recovery change references [LiuWQ0809/hongguo-android 89169c0](https://github.com/LiuWQ0809/hongguo-android/commit/89169c0ddfdc1fff3fbdf6a097df5802881375e9) and its preceding recovery/identity/refusal changes, GPL-3.0-only. Our implementation retains compatibility-route order, model-error precedence, cancellation and a monotonic request-start budget beginning before registration. HTTP 403/429 and known login/risk-control business refusals stop recovery. See `Tests/PlaybackRecoveryChecks.swift` and `VALIDATION.md` for offline and anonymous live evidence.
 - The signer now transports request bodies through base64 across JavaScriptCore, retaining arbitrary binary/gzip bytes. `signedRequest` chooses a branch-zero URL and signs those exact query bytes. `sign(url:body:device:)` signs an already-final URL and does not alter its query; callers requiring branch zero should use `signedRequest`.
 - No automatic protocol write replay exists in this module. Metadata POSTs are reads, and the anonymous registration is the only device-initialization mutation. Account writes and their replay/identity rules belong to the separate account module.
+
+
+## Playback v5 (2026-11-16)
+
+The production player now prefers N3urda/hongguoTV `6672b55`'s Android v04.10.03
+Medusa/Helios/Khronos and gzip `/novel/player/multi_video_model/player/v1` request.
+`PlayerSignV5.js` reuses the existing local primitives without changing catalogue,
+search or account signatures. Native JavaScriptCore passes all 32 independently
+derived SDK digest vectors and four carrier variants. The request signs the exact
+compressed bytes and final query, uses the registered anonymous identity and sends
+no account cookies. `device_level=1` includes issue 61's compatible-codec repair.
+The previous single and compatibility routes retain the shared start budget,
+cancellation, identity-cache and explicit refusal rules.
+
+Live progressive checks decoded the reported title's first two episodes and a hot
+catalogue episode, all answered by `M=ok`, with first frames at about 2% of the
+media size. Simulator UI acceptance rendered episodes 1 and 2, pause/resume and
+manual next-episode switching. Physical iPhone playback remains unverified.

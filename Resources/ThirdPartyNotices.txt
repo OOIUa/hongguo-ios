@@ -77,3 +77,20 @@ Comic ranking pagination (2026-11-14)
 - Reference: sunnysky123/hongguo-web, commit `1b00f06` (2026-11-13), MIT.
   https://github.com/sunnysky123/hongguo-web/commit/1b00f06
 - `ComicRankPager.swift` follows the upstream observation that cell/change ignores offset: send recent series IDs through filter_ids, accumulate unique rows, and stop when no new works arrive. The Swift implementation bounds each page to three requests.
+
+Playback v5 model endpoint (2026-11-16)
+
+- N3urda/hongguoTV, commit 6672b55d5308ea1ec26d2fe0bc0b2401ef4aa0c3, GPL-3.0-only.
+  https://github.com/N3urda/hongguoTV/tree/6672b55d5308ea1ec26d2fe0bc0b2401ef4aa0c3/kotlin-tv
+- References: Signer.kt, AesV3.kt, V5Constants.kt, MobilePlayback.kt, SIGNING_V5.md,
+  signing-v5-f13.json and signing-v5-carrier.json. The earlier GPL algorithm cites drpys 22261ad.
+- Playback now prefers /novel/player/multi_video_model/player/v1 with gzip JSON and
+  Android v04.10.03 Medusa/Helios/Khronos. The exact final query and compressed body
+  are signed with the same timestamp and registered anonymous identity. device_level=1
+  requests platform-compatible renditions. Both flat and data.1004 response maps select
+  only the requested episode. No account cookie or native signing SDK is used.
+- Local adaptations retain the proven-identity cache, bounded empty-response recovery,
+  previous single/model fallback paths, refusal handling and cancellation. Existing
+  catalogue, search and account signing stays unchanged. SDK-derived synthetic digest
+  vectors and carrier vectors verify the pure-code ports; the referenced research VM
+  was not copied or included.

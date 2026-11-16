@@ -11,4 +11,4 @@ cd "$project_dir"
 xcrun swiftc -swift-version 5 -O -suppress-warnings \
   Sources/Core/Models.swift Sources/Core/HGCrypto.swift Sources/Networking/*.swift Sources/Media/*.swift \
   Tests/LiveProgressiveSmoke.swift -lz -o "$test_dir/progressive-live"
-"$test_dir/progressive-live" --live "$project_dir/Sources/Networking"
+"$test_dir/progressive-live" "$@" "$project_dir/Sources/Networking"

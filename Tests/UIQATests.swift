@@ -2,6 +2,38 @@ import XCTest
 
 @MainActor
 final class HongguoQATests: XCTestCase {
+    /// Explicit anonymous real playback; run only on a task simulator.
+    func testV5PlaybackAndEpisodeSwitching() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication(bundleIdentifier: "com.ooiua.hongguo.ios")
+        app.launchArguments = ["-theme", "immersive", "-hasChosenTheme", "YES", "-updates.checkOnLaunch", "NO"]
+        app.launch()
+        if app.buttons["开始发现好故事"].waitForExistence(timeout: 5) { app.buttons["开始发现好故事"].tap() }
+        XCTAssertTrue(app.tabBars.buttons["剧场"].waitForExistence(timeout: 15))
+        app.tabBars.buttons["剧场"].tap()
+        XCTAssertTrue(app.buttons["搜索短剧"].waitForExistence(timeout: 15))
+        app.buttons["搜索短剧"].tap()
+        let input = app.textFields["搜索剧名或关键词"]
+        XCTAssertTrue(input.waitForExistence(timeout: 10)); input.tap(); input.typeText("无限白粥")
+        app.buttons["搜索"].firstMatch.tap()
+        let result = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "查看选集")).firstMatch
+        XCTAssertTrue(result.waitForExistence(timeout: 40)); result.tap()
+        let play = app.buttons["播放第 1 集"].firstMatch
+        XCTAssertTrue(play.waitForExistence(timeout: 30)); play.tap()
+        XCTAssertTrue(app.buttons["暂停"].waitForExistence(timeout: 60))
+        capture("v5-first-episode")
+        app.buttons["暂停"].tap()
+        XCTAssertTrue(app.buttons["播放"].waitForExistence(timeout: 5))
+        app.buttons["播放"].tap()
+        XCTAssertTrue(app.buttons["暂停"].waitForExistence(timeout: 10))
+        app.buttons["下一集"].tap()
+        let second = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "第 2 集 / 共")).firstMatch
+        XCTAssertTrue(second.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["暂停"].waitForExistence(timeout: 60))
+        capture("v5-second-episode")
+        app.buttons["关闭播放器"].tap()
+    }
+
     /// Anonymous live catalogue only, using a task-specific simulator with no personal account.
     func testHomeSectionsDoNotRepeat() throws {
         continueAfterFailure = false
@@ -142,13 +174,13 @@ final class HongguoQATests: XCTestCase {
         let progress = app.sliders["播放进度"]
         func percent() -> Double { Double((progress.value as? String ?? "0").filter { $0.isNumber || $0 == "." }) ?? 0 }
         point(0.5).doubleTap()
-        XCTAssertTrue(app.buttons["继续播放"].waitForExistence(timeout: 3), "double tap in the middle pauses")
+        XCTAssertTrue(app.buttons["播放"].waitForExistence(timeout: 3), "double tap in the middle pauses")
         // No side skips: a double tap on either side also just plays or pauses.
         let start = percent()
         point(0.88).doubleTap()
         XCTAssertTrue(app.buttons["暂停"].waitForExistence(timeout: 5), "double tap on the right resumes")
         point(0.12).doubleTap()
-        XCTAssertTrue(app.buttons["继续播放"].waitForExistence(timeout: 5), "double tap on the left pauses")
+        XCTAssertTrue(app.buttons["播放"].waitForExistence(timeout: 5), "double tap on the left pauses")
         XCTAssertLessThan(abs(percent() - start), 3, "side double taps do not jump")
         // A sideways swipe without holding never seeks; holding first and then dragging does.
         point(0.2).press(forDuration: 0.05, thenDragTo: point(0.8)); sleep(1)

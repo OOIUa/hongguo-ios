@@ -250,6 +250,7 @@ actor DramaAPI {
         let body = try ProtocolJSON.data(["biz_param":biz,"mixed_video_id_map":["1004":[episodeID]]])
         return try await playbackTrack(
             identity: { [self] in try await freshPlaybackIdentity() },
+            mobile: { [self] identity in try await readMobilePlayback(episodeID: episodeID, identity: identity) },
             single: { [self] identity in try await readSinglePlayback(episodeID: episodeID, identity: identity) },
             read: { [self] route, identity in try await readPlaybackRoute(route, episodeID: episodeID, body: body, identity: identity) },
             use: { [self] model in
@@ -433,12 +434,13 @@ actor DramaAPI {
     static let playbackHost = "api5-normal-sinfonlineb.fqnovel.com", playbackRetryHost = "api5-normal-hl.fqnovel.com"
     private static let tabVideoPath = "/reading/bookapi/video_tab/multi_video_model/v1/", postVideoPath = "/novel/player/multi_video_model/v1/"
 
-    /// Recover empty single-endpoint replies before compatibility routes (LiuWQ0809 89169c0).
+    /// Recover the preferred v5 endpoint before older routes (N3urda 6672b55 / LiuWQ0809 89169c0).
     /// Reuse only proven anonymous identities; retain cancellation, route order and model-error precedence.
     func playbackTrack(routes: [PlaybackRoute] = DramaAPI.playbackRoutes, budget: TimeInterval = 20,
                        now: @Sendable () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
                        pause: @Sendable () async throws -> Void = { try await Task.sleep(nanoseconds: 300_000_000) },
                        identity newIdentity: @Sendable () async throws -> RegisteredIdentity,
+                       mobile: (@Sendable (RegisteredIdentity) async throws -> PlaybackRead)? = nil,
                        single: (@Sendable (RegisteredIdentity) async throws -> PlaybackRead)? = nil,
                        read: @Sendable (PlaybackRoute, RegisteredIdentity) async throws -> PlaybackRead,
                        use: @Sendable ([String: Any]) async throws -> VideoTrack) async throws -> VideoTrack {
@@ -452,15 +454,16 @@ actor DramaAPI {
         var failure: Error?, modelFailure: Error?
         var onlyEmpty = true
         defer { lastPlaybackTrace = trace.joined(separator: " ") }
-        if let single {
+        let label = mobile == nil ? "S" : "M"
+        if let primary = mobile ?? single {
             for attempt in 0..<5 {
                 try Task.checkCancellation()
                 guard now() - started < budget else { break }
                 var model: [String: Any]?
                 do {
-                    switch try await single(identity) {
+                    switch try await primary(identity) {
                     case .empty:
-                        trace.append("S=0B"); forgetPlaybackIdentity(identity)
+                        trace.append(label + "=0B"); forgetPlaybackIdentity(identity)
                         guard attempt < 4, now() - started < budget else { break }
                         try await pause()
                         try Task.checkCancellation()
@@ -468,31 +471,52 @@ actor DramaAPI {
                         do { identity = try await newIdentity(); trace.append("new") }
                         catch { try Task.checkCancellation(); failure = error; trace.append("new=failed"); break }
                         continue
-                    case .invalid: trace.append("S=invalid"); onlyEmpty = false
+                    case .invalid: trace.append(label + "=invalid"); onlyEmpty = false
                     case .model(let value): model = value
                     }
                 } catch is CancellationError { throw CancellationError()
                 } catch let error as PlaybackRefusal {
-                    forgetPlaybackIdentity(identity); trace.append("S=rejected"); throw error
-                } catch { try Task.checkCancellation(); trace.append("S=failed"); onlyEmpty = false; failure = error }
+                    forgetPlaybackIdentity(identity); trace.append(label + "=rejected"); throw error
+                } catch { try Task.checkCancellation(); trace.append(label + "=failed"); onlyEmpty = false; failure = error }
                 if let model {
                     onlyEmpty = false
                     do {
                         let track = try await use(model)
                         try Task.checkCancellation()
                         if successfulPlaybackIdentity == nil { successfulPlaybackIdentity = identity }
-                        trace.append("S=ok")
+                        trace.append(label + "=ok")
                         return track
                     } catch is CancellationError { throw CancellationError()
                     } catch let error as PlaybackRefusal { forgetPlaybackIdentity(identity); throw error
                     } catch {
                         try Task.checkCancellation()
-                        trace.append("S=unusable")
+                        trace.append(label + "=unusable")
                         modelFailure = error
                     }
                 }
                 break // Only an empty reply repeats the single endpoint.
             }
+        }
+        if mobile != nil, let single, now() - started < budget {
+            try Task.checkCancellation()
+            do {
+                switch try await single(identity) {
+                case .model(let model):
+                    onlyEmpty = false
+                    do {
+                        let track = try await use(model)
+                        try Task.checkCancellation()
+                        if successfulPlaybackIdentity == nil { successfulPlaybackIdentity = identity }
+                        trace.append("S=ok"); return track
+                    } catch is CancellationError { throw CancellationError()
+                    } catch let error as PlaybackRefusal { throw error
+                    } catch { try Task.checkCancellation(); modelFailure = modelFailure ?? error; trace.append("S=unusable") }
+                case .empty: trace.append("S=0B"); forgetPlaybackIdentity(identity)
+                case .invalid: trace.append("S=invalid"); onlyEmpty = false
+                }
+            } catch is CancellationError { throw CancellationError()
+            } catch let error as PlaybackRefusal { forgetPlaybackIdentity(identity); throw error
+            } catch { try Task.checkCancellation(); failure = error; onlyEmpty = false; trace.append("S=failed") }
         }
         for route in routes {
             guard now() - started < budget else { break }
@@ -535,7 +559,7 @@ actor DramaAPI {
             }
         }
         if let modelFailure { throw modelFailure }
-        if onlyEmpty { throw HGError.message("播放服务返回空响应，疑似播放设备身份被拒，请稍后重试") }
+        if onlyEmpty { throw HGError.message("播放服务返回空响应，原因尚未确认，请稍后重试") }
         throw failure ?? HGError.message("服务暂未返回当前分集片源")
     }
 
@@ -568,6 +592,21 @@ actor DramaAPI {
         guard let response = try? ProtocolJSON.object(data) else { return .invalid }
         guard ProtocolJSON.integer(response["code"] ?? response["Code"]) == 0 else { throw HGError.message(Self.rejectedPlayback) }
         return .model(ProtocolJSON.dictionary(ProtocolJSON.dictionary(ProtocolJSON.dictionary(response["data"])[episodeID])["video_model"]))
+    }
+
+    private func readMobilePlayback(episodeID: String, identity: RegisteredIdentity) async throws -> PlaybackRead {
+        let body = try Self.mobileBody(episodeID: episodeID)
+        let device = Self.mobileDevice(identity)
+        let signed = try await signer.signedPlaybackV5(baseURL: Self.mobileVideoURL,
+            query: device.keys.sorted().map { [$0, device[$0]!] }, body: body, device: device,
+            now: Int64(Date().timeIntervalSince1970 * 1000))
+        var headers = signed.headers
+        headers["User-Agent"] = "com.phoenix.read/73932 (Linux; U; Android 12; zh_CN_#Hans; PGT-AN10; Build/V417IR;tt-ok/3.12.13.20)"
+        headers["Accept"] = "application/json"; headers["Content-Type"] = "application/json; charset=utf-8"
+        headers["Content-Encoding"] = "gzip"
+        let data = try await fetch(url: signed.url, body: body, headers: headers, timeout: 8, playback: true)
+        guard !data.isEmpty else { return .empty }
+        return try Self.mobileVideoModel(data, episodeID: episodeID).map { .model($0) } ?? .invalid
     }
 
     // MARK: Single-episode endpoint (2026-11-11)

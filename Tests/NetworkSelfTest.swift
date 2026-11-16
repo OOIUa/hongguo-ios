@@ -29,6 +29,7 @@ import JavaScriptCore
             let actual = context.evaluateScript(source)?.toString() ?? ""
             precondition(context.exception == nil, "JavaScript runtime failed")
             precondition(HGCrypto.sha256(Data(actual.utf8)).hexString == fixture["sha256"] as! String, "Node signing oracle mismatch")
+            if timestamp == (fixtures.first!["timestamp"] as! NSNumber).int64Value { try await checkMobilePlayback(context: context, root: root) }
         }
         let precise = try ProtocolJSON.object(Data(#"{"id":18446744073709551615,"larger":123456789012345678901234567890,"text":"12345678901234567890","fraction":1234567890123456.5,"exponent":1234567890123456e2}"#.utf8))
         precondition(precise["id"] as? String == "18446744073709551615")
