@@ -4,6 +4,7 @@
 
 - iOS 原生移植项目，Android 参考仓库为 https://github.com/OOIUa/hongguo-android 。
 - iOS 代码独立托管于公开仓库 `OOIUa/hongguo-ios`；不要向 Android 仓库推送 iOS 代码。
+- Git 作者和提交者统一使用 `OOIUa <79910828+OOIUa@users.noreply.github.com>`，包括发布脚本生成的更新源提交。
 - 用户先在自己的 iPhone 测试，已有自己的测试签名。**每次只打包无签名 iPhone IPA**，由用户自行签名安装。
 - 构建始终传入 `CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=''`。不申请、生成、导入或提交签名证书、描述文件、私钥。
 - 无签名 IPA 不能直接在设备自安装。更新页应提供校验后导出给签名工具的流程，不能显示虚假的“安装完成”。

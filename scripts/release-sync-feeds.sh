@@ -77,7 +77,9 @@ PY
     echo "Stable feeds already match $release_tag."
     exit 0
   fi
-  git -C "$release_worktree" -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+  GIT_AUTHOR_NAME='OOIUa' GIT_AUTHOR_EMAIL='79910828+OOIUa@users.noreply.github.com' \
+    GIT_COMMITTER_NAME='OOIUa' GIT_COMMITTER_EMAIL='79910828+OOIUa@users.noreply.github.com' \
+    git -C "$release_worktree" \
     commit -m "Update distribution feeds for $release_tag"
   if git -C "$release_worktree" push origin HEAD:main; then
     echo "Stable feeds synchronized for $release_tag."
