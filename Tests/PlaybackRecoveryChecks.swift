@@ -25,7 +25,7 @@ func playbackRecoveryChecks(resources: URL) async throws {
         mobile: { _ in mobileFallback.singles += 1; return .empty },
         single: { _ in mobileFallback.legacy += 1; return .model(model) },
         read: { _,_ in fatalError("Old single recovery must precede compatibility endpoints") }, use: { _ in track })
-    precondition(mobileFallback.singles == 5 && mobileFallback.legacy == 1)
+    precondition(mobileFallback.singles == 2 && mobileFallback.legacy == 1 && mobileFallback.registered == 1)
     let refusedMobile = DramaAPI(resourceDirectory: resources)
     do {
         _ = try await refusedMobile.playbackTrack(identity: { mobileFallback.identity() },
@@ -42,15 +42,19 @@ func playbackRecoveryChecks(resources: URL) async throws {
         fatalError("Invalid model accepted")
     } catch { precondition(error.localizedDescription == "model marker") }
     let reuse = DramaAPI(resourceDirectory: resources), calls = Calls()
+    // Each episode initially returns an empty body for that session.
     for _ in 0..<2 {
-        _ = try await reuse.playbackTrack(pause: {}, identity: { calls.identity() }, single: {
-            calls.singles += 1; calls.identities.append($0)
-            if calls.singles == 1 { return .empty }
-            return .model(model)
+        let episode = Calls()
+        _ = try await reuse.playbackTrack(pause: {}, identity: { calls.identity() }, mobile: { session in
+            let firstRead = !episode.identities.contains(session)
+            episode.identities.append(session)
+            calls.identities.append(session)
+            return firstRead ? .empty : .model(model)
         }, read: { _,_ in fatalError("Recovery must precede legacy routes") }, use: { _ in track })
+        precondition(episode.identities.count == 2)
     }
-    precondition(calls.registered == 2 && calls.singles == 3)
-    precondition(calls.identities[0] != calls.identities[1] && calls.identities[1] == calls.identities[2])
+    precondition(calls.registered == 1)
+    precondition(calls.identities.allSatisfy { $0 == calls.identities[0] })
 
     let exhausted = DramaAPI(resourceDirectory: resources), finite = Calls()
     do {
@@ -58,7 +62,7 @@ func playbackRecoveryChecks(resources: URL) async throws {
             read: { _,_ in fatalError() }, use: { _ in fatalError() })
         fatalError("Persistent empty replies must fail")
     } catch { precondition(error.localizedDescription.contains("空响应")) }
-    precondition(finite.singles == 5 && finite.registered == 5)
+    precondition(finite.singles == 2 && finite.registered == 1)
 
     for status in [403,429] {
         let api = DramaAPI(resourceDirectory: resources), rejected = Calls()
@@ -69,6 +73,17 @@ func playbackRecoveryChecks(resources: URL) async throws {
             fatalError("HTTP refusal must fail")
         } catch let error as DramaAPI.PlaybackRefusal { precondition(error.localizedDescription.contains("\(status)")) }
         precondition(rejected.singles == 1 && rejected.registered == 1)
+    }
+    // A transient empty body or a request to wait must not discard last episode's session.
+    for refusal in [DramaAPI.PlaybackRefusal(retryAfterStatus: 200), DramaAPI.PlaybackRefusal(http: 429)] {
+        do {
+            _ = try await reuse.playbackTrack(pause: {}, identity: { fatalError("Expected the previous session") },
+                mobile: { _ in .empty }, single: { _ in .empty }, read: { _,_ in throw refusal }, use: { _ in track })
+            fatalError("Backoff must stop playback recovery")
+        } catch let error as DramaAPI.PlaybackRefusal { precondition(error.isBackoff) }
+        _ = try await reuse.playbackTrack(identity: { fatalError("Backoff must preserve the session") },
+            mobile: { session in precondition(session == calls.identities[0]); return .model(model) },
+            read: { _,_ in fatalError("Usable episode should start immediately") }, use: { _ in track })
     }
     for code in [1003,101144,110001,110002] {
         do { try DramaAPI.checkPlaybackBusinessRejection(Data("{\"code\":\(code),\"data\":null}".utf8)); fatalError("Refusal was ignored") }
@@ -105,9 +120,15 @@ func playbackRecoveryChecks(resources: URL) async throws {
         }, read: { _,_ in fatalError() }, use: { _ in fatalError() })
     }
     var iterator = entered.stream.makeAsyncIterator(); _ = await iterator.next()
-    _ = try await concurrentAPI.playbackTrack(pause: {}, identity: { concurrent.identity() }, single: { identity in
-        concurrent.singles += 1; concurrent.identities.append(identity)
-        return concurrent.singles == 1 ? .empty : .model(model)
+    do {
+        _ = try await concurrentAPI.playbackTrack(identity: { fatalError("Should reuse the seed identity") },
+            single: { _ in throw DramaAPI.PlaybackRefusal(http: 403) },
+            read: { _,_ in fatalError() }, use: { _ in track })
+        fatalError("Expected the seed session to be rejected")
+    } catch is DramaAPI.PlaybackRefusal { }
+    _ = try await concurrentAPI.playbackTrack(identity: { concurrent.identity() }, single: { identity in
+        concurrent.identities.append(identity)
+        return .model(model)
     }, read: { _,_ in fatalError() }, use: { _ in track })
     release.continuation.yield(())
     do { _ = try await stale.value; fatalError("Stale refusal ignored") } catch is DramaAPI.PlaybackRefusal { }
@@ -116,5 +137,5 @@ func playbackRecoveryChecks(resources: URL) async throws {
     }, read: { _,_ in fatalError() }, use: { _ in track })
     precondition(concurrent.registered == 2)
     entered.continuation.finish(); release.continuation.finish()
-    print("PASS playback recovery: proven identity reuse, empty renewal, five-attempt cap, HTTP/business refusals, budget, cancellation and stale concurrent failure")
+    print("PASS playback recovery: same-session retry for first play and episode switch, bounded fallback, refusals, budget, cancellation and stale concurrent failure")
 }

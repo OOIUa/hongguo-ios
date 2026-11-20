@@ -9,6 +9,7 @@ private final class ProtocolSessionDelegate: NSObject, URLSessionTaskDelegate {
 
 actor DramaAPI {
     static let shared = DramaAPI()
+    private static let playbackBudget: TimeInterval = 20
     private let session: URLSession
     private let delegate = ProtocolSessionDelegate()
     private let signer: ProtocolSigner
@@ -248,11 +249,14 @@ actor DramaAPI {
         let biz: [String: Any] = ["detail_page_version":0,"device_level":1,"disable_digg_stat":false,"need_all_video_definition":true,
             "need_mp4_align":false,"use_os_player":false,"use_server_dns":false,"video_platform":1024]
         let body = try ProtocolJSON.data(["biz_param":biz,"mixed_video_id_map":["1004":[episodeID]]])
+        let retryDeadline = ProcessInfo.processInfo.systemUptime + Self.playbackBudget
         return try await playbackTrack(
             identity: { [self] in try await freshPlaybackIdentity() },
             mobile: { [self] identity in try await readMobilePlayback(episodeID: episodeID, identity: identity) },
             single: { [self] identity in try await readSinglePlayback(episodeID: episodeID, identity: identity) },
-            read: { [self] route, identity in try await readPlaybackRoute(route, episodeID: episodeID, body: body, identity: identity) },
+            read: { [self] route, identity in
+                try await readPlaybackRoute(route, episodeID: episodeID, body: body, identity: identity, retryDeadline: retryDeadline)
+            },
             use: { [self] model in
                 guard !model.isEmpty else { throw HGError.message("服务暂未返回当前分集片源") }
                 return try await modelTrack(model)
@@ -436,7 +440,7 @@ actor DramaAPI {
 
     /// Recover the preferred v5 endpoint before older routes (N3urda 6672b55 / LiuWQ0809 89169c0).
     /// Reuse only proven anonymous identities; retain cancellation, route order and model-error precedence.
-    func playbackTrack(routes: [PlaybackRoute] = DramaAPI.playbackRoutes, budget: TimeInterval = 20,
+    func playbackTrack(routes: [PlaybackRoute] = DramaAPI.playbackRoutes, budget: TimeInterval = DramaAPI.playbackBudget,
                        now: @Sendable () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
                        pause: @Sendable () async throws -> Void = { try await Task.sleep(nanoseconds: 300_000_000) },
                        identity newIdentity: @Sendable () async throws -> RegisteredIdentity,
@@ -456,27 +460,27 @@ actor DramaAPI {
         defer { lastPlaybackTrace = trace.joined(separator: " ") }
         let label = mobile == nil ? "S" : "M"
         if let primary = mobile ?? single {
-            for attempt in 0..<5 {
+            // An empty body can be transient. Give the current episode one more read
+            // in the same session, leaving time for the existing fallback readers.
+            for attempt in 0..<2 {
                 try Task.checkCancellation()
                 guard now() - started < budget else { break }
                 var model: [String: Any]?
                 do {
                     switch try await primary(identity) {
                     case .empty:
-                        trace.append(label + "=0B"); forgetPlaybackIdentity(identity)
-                        guard attempt < 4, now() - started < budget else { break }
+                        trace.append(label + "=0B")
+                        guard attempt == 0, now() - started < budget else { break }
                         try await pause()
-                        try Task.checkCancellation()
-                        guard now() - started < budget else { break }
-                        do { identity = try await newIdentity(); trace.append("new") }
-                        catch { try Task.checkCancellation(); failure = error; trace.append("new=failed"); break }
                         continue
                     case .invalid: trace.append(label + "=invalid"); onlyEmpty = false
                     case .model(let value): model = value
                     }
                 } catch is CancellationError { throw CancellationError()
                 } catch let error as PlaybackRefusal {
-                    forgetPlaybackIdentity(identity); trace.append(label + "=rejected"); throw error
+                    forgetPlaybackIdentity(identity, after: error)
+                    trace.append(label + (error.isBackoff ? "=backoff" : "=rejected"))
+                    throw error
                 } catch { try Task.checkCancellation(); trace.append(label + "=failed"); onlyEmpty = false; failure = error }
                 if let model {
                     onlyEmpty = false
@@ -487,7 +491,7 @@ actor DramaAPI {
                         trace.append(label + "=ok")
                         return track
                     } catch is CancellationError { throw CancellationError()
-                    } catch let error as PlaybackRefusal { forgetPlaybackIdentity(identity); throw error
+                    } catch let error as PlaybackRefusal { forgetPlaybackIdentity(identity, after: error); throw error
                     } catch {
                         try Task.checkCancellation()
                         trace.append(label + "=unusable")
@@ -511,11 +515,11 @@ actor DramaAPI {
                     } catch is CancellationError { throw CancellationError()
                     } catch let error as PlaybackRefusal { throw error
                     } catch { try Task.checkCancellation(); modelFailure = modelFailure ?? error; trace.append("S=unusable") }
-                case .empty: trace.append("S=0B"); forgetPlaybackIdentity(identity)
+                case .empty: trace.append("S=0B")
                 case .invalid: trace.append("S=invalid"); onlyEmpty = false
                 }
             } catch is CancellationError { throw CancellationError()
-            } catch let error as PlaybackRefusal { forgetPlaybackIdentity(identity); throw error
+            } catch let error as PlaybackRefusal { forgetPlaybackIdentity(identity, after: error); throw error
             } catch { try Task.checkCancellation(); failure = error; onlyEmpty = false; trace.append("S=failed") }
         }
         for route in routes {
@@ -531,13 +535,15 @@ actor DramaAPI {
             let model: [String: Any]
             do {
                 switch try await read(route, identity) {
-                case .empty: trace.append(label + "=0B"); forgetPlaybackIdentity(identity); continue
+                case .empty: trace.append(label + "=0B"); continue
                 case .invalid: trace.append(label + "=invalid"); onlyEmpty = false; continue
                 case .model(let value): model = value
                 }
             } catch is CancellationError { throw CancellationError()
             } catch let error as PlaybackRefusal {
-                forgetPlaybackIdentity(identity); trace.append(label + "=rejected"); throw error
+                forgetPlaybackIdentity(identity, after: error)
+                trace.append(label + (error.isBackoff ? "=backoff" : "=rejected"))
+                throw error
             } catch let error as HGError {
                 try Task.checkCancellation()
                 if case .message(let text) = error, text == Self.rejectedPlayback { forgetPlaybackIdentity(identity); trace.append(label + "=rejected"); throw error }
@@ -551,7 +557,7 @@ actor DramaAPI {
                 trace.append(label + "=ok")
                 return track
             } catch is CancellationError { throw CancellationError()
-            } catch let error as PlaybackRefusal { forgetPlaybackIdentity(identity); throw error
+            } catch let error as PlaybackRefusal { forgetPlaybackIdentity(identity, after: error); throw error
             } catch {
                 try Task.checkCancellation()
                 trace.append(label + "=unusable")
@@ -563,14 +569,25 @@ actor DramaAPI {
         throw failure ?? HGError.message("服务暂未返回当前分集片源")
     }
 
-    private func forgetPlaybackIdentity(_ identity: RegisteredIdentity) {
-        if successfulPlaybackIdentity == identity { successfulPlaybackIdentity = nil }
+    private func forgetPlaybackIdentity(_ identity: RegisteredIdentity, after refusal: PlaybackRefusal? = nil) {
+        if refusal?.isBackoff != true, successfulPlaybackIdentity == identity { successfulPlaybackIdentity = nil }
     }
 
     struct PlaybackRefusal: LocalizedError {
         let errorDescription: String?
-        init(http: Int) { errorDescription = "播放服务拒绝请求（HTTP \(http)）" }
-        init(code: Int) { errorDescription = "播放服务拒绝请求（错误码 \(code)），请稍后重试" }
+        let isBackoff: Bool
+        init(http: Int) {
+            isBackoff = http == 429
+            errorDescription = "播放服务拒绝请求（HTTP \(http)）"
+        }
+        init(code: Int) {
+            isBackoff = false
+            errorDescription = "播放服务拒绝请求（错误码 \(code)），请稍后重试"
+        }
+        init(retryAfterStatus: Int) {
+            isBackoff = true
+            errorDescription = "播放服务要求稍后重试（HTTP \(retryAfterStatus)）"
+        }
     }
 
     static func checkPlaybackBusinessRejection(_ data: Data) throws {
@@ -583,9 +600,11 @@ actor DramaAPI {
     enum PlaybackRead { case model([String: Any]), empty, invalid }
     private static let rejectedPlayback = "当前分集暂未提供播放信息"
 
-    private func readPlaybackRoute(_ route: PlaybackRoute, episodeID: String, body: Data, identity: RegisteredIdentity) async throws -> PlaybackRead {
+    private func readPlaybackRoute(_ route: PlaybackRoute, episodeID: String, body: Data, identity: RegisteredIdentity,
+                                   retryDeadline: TimeInterval) async throws -> PlaybackRead {
         let signed = try await signedPlaybackRequest(route: route, episodeID: episodeID, body: body, identity: identity)
-        let data = try await fetch(url: signed.url, body: route.post ? body : nil, headers: signed.headers, timeout: 8, playback: true)
+        let data = try await fetch(url: signed.url, body: route.post ? body : nil, headers: signed.headers, timeout: 8,
+                                   playback: true, retryDeadline: retryDeadline)
         guard !data.isEmpty else { return .empty }
         try Self.checkPlaybackBusinessRejection(data)
         if !route.post { return Self.tabVideoModel(data, episodeID: episodeID).map { .model($0) } ?? .invalid }
@@ -763,7 +782,8 @@ actor DramaAPI {
         guard !data.isEmpty else { throw HGError.message("服务返回空响应，请稍后重试") }
         do { return try ProtocolJSON.object(data) } catch { throw HGError.message("服务数据格式发生变化，请稍后重试") }
     }
-    private func fetch(url: URL, body: Data? = nil, headers: [String: String], timeout: TimeInterval = 18, playback: Bool = false) async throws -> Data {
+    private func fetch(url: URL, body: Data? = nil, headers: [String: String], timeout: TimeInterval = 18,
+                       playback: Bool = false, retryDeadline: TimeInterval = .infinity) async throws -> Data {
         try Task.checkCancellation()
         let scheduled = max(Date(), nextRequestAt); nextRequestAt = scheduled.addingTimeInterval(0.26)
         let wait = scheduled.timeIntervalSinceNow
@@ -772,9 +792,34 @@ actor DramaAPI {
         var request = URLRequest(url: url, timeoutInterval: timeout)
         request.httpMethod = body == nil ? "GET" : "POST"; request.httpBody = body; request.httpShouldHandleCookies = false
         for (name,value) in headers { request.setValue(value, forHTTPHeaderField: name) }
-        let (data,response) = try await session.data(for: request)
+        return try await Self.responseData(for: request, playback: playback, retryDeadline: retryDeadline) { try await session.data(for: $0) }
+    }
+
+    static func responseData(for request: URLRequest, playback: Bool, retryDeadline: TimeInterval = .infinity,
+                             send: (URLRequest) async throws -> (Data, URLResponse)) async throws -> Data {
         try Task.checkCancellation()
-        if playback, let http = response as? HTTPURLResponse, [403,429].contains(http.statusCode) { throw PlaybackRefusal(http: http.statusCode) }
+        let deadline = min(retryDeadline, ProcessInfo.processInfo.systemUptime + request.timeoutInterval)
+        let (data, response): (Data, URLResponse)
+        do {
+            (data, response) = try await send(request)
+        } catch let error as URLError where playback && request.httpMethod == "GET" &&
+            (error.code == .cannotConnectToHost || error.code == .networkConnectionLost) {
+            try Task.checkCancellation()
+            let remaining = deadline - ProcessInfo.processInfo.systemUptime
+            guard remaining > 0 else { throw error }
+            var retry = request
+            retry.timeoutInterval = remaining
+            (data, response) = try await send(retry)
+        }
+        try Task.checkCancellation()
+        if playback, let http = response as? HTTPURLResponse {
+            if [403, 429].contains(http.statusCode) { throw PlaybackRefusal(http: http.statusCode) }
+            if http.statusCode == 503 || (http.statusCode == 200 && data.isEmpty),
+               let retryAfter = http.value(forHTTPHeaderField: "Retry-After"),
+               !retryAfter.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                throw PlaybackRefusal(retryAfterStatus: http.statusCode)
+            }
+        }
         guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
             throw HGError.message("服务连接失败（HTTP \((response as? HTTPURLResponse)?.statusCode ?? 0)）")
         }

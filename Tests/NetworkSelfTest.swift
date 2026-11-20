@@ -495,7 +495,7 @@ import JavaScriptCore
             use: { try await trackAPI.modelTrack($0) })
         precondition(fellBack.url.absoluteString == "https://v1.qznovelvod.com/keyed.mp4" && fallCalls.routes == Array(DramaAPI.playbackRoutes.prefix(2)))
         let fallTrace = await trackAPI.lastPlaybackTrace
-        precondition(fallTrace.components(separatedBy: "S=0B").count - 1 == 5 && fallTrace.hasSuffix("G:b=unusable P:b=ok"), fallTrace)
+        precondition(fallTrace == "S=0B S=0B G:b=unusable P:b=ok", fallTrace)
         // A single model that yields no track is reported ahead of empty old routes.
         do {
             _ = try await trackAPI.playbackTrack(identity: { routeIdentity }, single: { _ in .model(keylessModel) },
