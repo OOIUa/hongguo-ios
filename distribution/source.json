@@ -3,24 +3,24 @@
   "message": "项目维护者发布的未签名 IPA；需要自行签名安装。",
   "identifier": "ooiua.hongguo-ios.source",
   "sourceURL": "https://raw.githubusercontent.com/OOIUa/hongguo-ios/main/distribution/source.json",
-  "sourceicon": "https://raw.githubusercontent.com/OOIUa/hongguo-ios/v0.1.27/distribution/icon.png",
+  "sourceicon": "https://raw.githubusercontent.com/OOIUa/hongguo-ios/v0.1.28/distribution/icon.png",
   "apps": [
     {
       "name": "红果独立版",
       "type": "1",
       "bundleIdentifier": "com.ooiua.hongguo.ios",
-      "version": "0.1.27",
-      "build": 28,
+      "version": "0.1.28",
+      "build": 29,
       "minimumOSVersion": "17.0",
-      "versionDate": "2026-11-16T14:42:27Z",
-      "versionDescription": "修复播放接口空响应：接入新版 v5 本机签名与压缩模型请求。\n调整设备能力声明，改善部分剧集只有不兼容编码而无法播放的问题。\n保留匿名身份复用、旧接口回退、明确拒绝与取消保护。\n未签名 IPA，需使用本人的证书签名后安装。",
+      "versionDate": "2026-11-20T05:53:35Z",
+      "versionDescription": "修复开始播放或切集时因播放信息偶发返回空正文而失败的问题；会在同一会话重新读取当前集一次。\n读取播放信息时遇到临时断线，会在剩余时间内重试一次。服务端要求稍后再试时会停止本次请求。\n未签名 IPA，需使用本人的证书签名后安装。",
       "lock": "0",
-      "downloadURL": "https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.27/Hongguo-iOS-0.1.27-unsigned.ipa",
+      "downloadURL": "https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.28/Hongguo-iOS-0.1.28-unsigned.ipa",
       "isLanZouCloud": "0",
-      "iconURL": "https://raw.githubusercontent.com/OOIUa/hongguo-ios/v0.1.27/distribution/icon.png",
+      "iconURL": "https://raw.githubusercontent.com/OOIUa/hongguo-ios/v0.1.28/distribution/icon.png",
       "tintColor": "E8463F",
-      "size": "1864015",
-      "sha256": "faae18e097cacc21fd991b6372a1ef2d65c7ad7c49721f9018e0b9479ac366d4"
+      "size": "1883746",
+      "sha256": "fb4544815c8be84d93717f1d7dd4e9803c6039a8a49ad02963f575b87a229665"
     }
   ]
 }

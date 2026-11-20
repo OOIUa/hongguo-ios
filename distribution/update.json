@@ -1,18 +1,17 @@
 {
-  "version": "0.1.27",
-  "build": 28,
+  "version": "0.1.28",
+  "build": 29,
   "minimumOSVersion": "17.0",
   "releaseNotes": [
-    "修复播放接口空响应：接入新版 v5 本机签名与压缩模型请求。",
-    "调整设备能力声明，改善部分剧集只有不兼容编码而无法播放的问题。",
-    "保留匿名身份复用、旧接口回退、明确拒绝与取消保护。"
+    "修复开始播放或切集时因播放信息偶发返回空正文而失败的问题；会在同一会话重新读取当前集一次。",
+    "读取播放信息时遇到临时断线，会在剩余时间内重试一次。服务端要求稍后再试时会停止本次请求。"
   ],
-  "publishedAt": "2026-11-16T14:42:27Z",
-  "downloadURL": "https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.27/Hongguo-iOS-0.1.27-unsigned.ipa",
-  "sha256": "faae18e097cacc21fd991b6372a1ef2d65c7ad7c49721f9018e0b9479ac366d4",
-  "size": 1864015,
+  "publishedAt": "2026-11-20T05:53:35Z",
+  "downloadURL": "https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.28/Hongguo-iOS-0.1.28-unsigned.ipa",
+  "sha256": "fb4544815c8be84d93717f1d7dd4e9803c6039a8a49ad02963f575b87a229665",
+  "size": 1883746,
   "mirrors": {
-    "gh-proxy": "https://gh-proxy.com/https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.27/Hongguo-iOS-0.1.27-unsigned.ipa",
-    "ghfast": "https://ghfast.top/https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.27/Hongguo-iOS-0.1.27-unsigned.ipa"
+    "gh-proxy": "https://gh-proxy.com/https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.28/Hongguo-iOS-0.1.28-unsigned.ipa",
+    "ghfast": "https://ghfast.top/https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.28/Hongguo-iOS-0.1.28-unsigned.ipa"
   }
 }
