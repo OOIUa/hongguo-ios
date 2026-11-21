@@ -343,7 +343,7 @@ struct PlayerScreen: View {
                 Button(action: session.next) { Image(systemName: "forward.end.fill").frame(width: 38, height: 44).contentShape(Rectangle()) }.disabled(session.index + 1 >= session.detail.episodes.count).accessibilityLabel("下一集")
                 Spacer(minLength: 0)
                 DanmakuControl(enabled: session.app.danmaku.enabled,
-                    onToggle: { session.app.setDanmaku(session.app.danmaku.copy(enabled: !session.app.danmaku.enabled)) },
+                    onToggle: { var next = session.app.danmaku; next.enabled.toggle(); session.app.setDanmaku(next) },
                     onSettings: { danmakuVisible = true })
                 Button { speedsVisible = true } label: { Text(String(format: "%g×", session.app.speed)).font(.subheadline.weight(.semibold)).frame(minWidth: 52, minHeight: 44).contentShape(Rectangle()) }.accessibilityLabel("播放倍速").accessibilityValue(String(format: "%g×", session.app.speed)).accessibilityIdentifier("player.speed")
                 Button { episodesVisible = true } label: { Label("选集", systemImage: "square.grid.2x2").font(.subheadline.weight(.semibold)).frame(minHeight: 44).contentShape(Rectangle()) }.accessibilityIdentifier("player.episodes")
