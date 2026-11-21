@@ -27,6 +27,17 @@ func checkMobilePlayback(context: JSContext, root: URL) async throws {
     precondition(signed.headers["x-khronos"] == "1800000000" && signed.headers["x-medusa"] != nil && signed.headers["x-helios"] != nil)
     precondition(signed.headers["x-ss-stub"] == HGCrypto.md5(body).hexString.uppercased())
     precondition(signed.headers["Cookie"] == nil && signed.headers["x-argus"] == nil && signed.headers["x-ladon"] == nil)
+    let tabSigned = try await signer.signedPlaybackGetV5(baseURL: "https://example.test/tab",
+        query: try DramaAPI.videoTabV5Query(identity, episodeID: "1234"), device: device,
+        now: 1_800_000_000_000)
+    let tabValues = URLComponents(url: tabSigned.url, resolvingAgainstBaseURL: false)!.queryItems!
+    precondition(tabValues.first { $0.name == "video_id" }?.value == "1234")
+    precondition(tabValues.first { $0.name == "aid" }?.value == "8662" && tabValues.first { $0.name == "version_name" }?.value == "7.4.3.32")
+    precondition(tabValues.first { $0.name == "device_level" }?.value == "1" && tabValues.first { $0.name == "from_video_id" }?.value == "")
+    precondition(tabValues.first { $0.name == "ts" } == nil)
+    precondition(tabSigned.headers["x-khronos"] == "1800000000" && tabSigned.headers["x-medusa"] != nil && tabSigned.headers["x-helios"] != nil)
+    precondition(tabSigned.headers["x-ss-stub"] == nil, "Bodyless GET must not carry x-ss-stub")
+    precondition(tabSigned.headers["Cookie"] == nil && tabSigned.headers["x-argus"] == nil && tabSigned.headers["x-ladon"] == nil)
     let model: [String: Any] = ["video_list":[["main_url":"https://example.test/video", "codec_type":"h264"]]]
     for entries: [String: Any] in [["1234":["video_model":model]], ["1004":["1234":["video_model":model]]]] {
         let bytes = try ProtocolJSON.data(["code":0,"data":entries])
@@ -38,7 +49,7 @@ func checkMobilePlayback(context: JSContext, root: URL) async throws {
     catch is DramaAPI.PlaybackRefusal { }
     do { _ = try DramaAPI.mobileVideoModel(Data(repeating: 0, count: 2 * 1024 * 1024 + 1), episodeID: "1234"); preconditionFailure("Oversized model accepted") }
     catch is HGError { }
-    print("PASS mobile v5: 32 independent digest vectors, 4 carriers, exact gzip/identity binding, both model maps, refusal and size limits")
+    print("PASS mobile v5: 32 independent digest vectors, 4 carriers, exact gzip/identity binding, both model maps, refusal and size limits; bodyless video_tab GET carries only khronos/helios/medusa with the 7.4.3.32 tab query")
 }
 
 private func checkPlaybackHTTPResponses() async throws {

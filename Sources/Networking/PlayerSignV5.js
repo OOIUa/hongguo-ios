@@ -56,6 +56,23 @@ function medusaV5(url, body, ts, who) {
     const prefix=Buffer.concat([le32(5),magic]);for(let i=0;i<prefix.length;i++)prefix[i]^=le32(ts)[i&3];
     return Buffer.concat([prefix,Buffer.from([nonce&255,(nonce>>>8)&255,0,1]),encrypted]).toString('base64');
 }
+// v5 无正文 GET 签名（video_tab 用；2026-11-20 起唯一可用的取源路径，同步自
+// jackotom/hongguo-drama 7.7 / OOIUa/hongguo-android PR #12，GPL-3.0-only）。
+// 与带正文的 v5 POST 相比：正文摘要按**空 body 的 MD5** 计算，且只返回
+// x-khronos / x-helios / x-medusa 三个头，调用方不得附带 Content-Type /
+// Content-Encoding / x-ss-stub。
+function hgSignedPlaybackGetV5(base,pairsJSON,deviceJSON,now) {
+    const pairs=JSON.parse(pairsJSON).filter(p=>p[0]!=='_rticket'), device=JSON.parse(deviceJSON);
+    const ts=Math.floor(now/1000), body=Buffer.alloc(0), bodyHash=crypto.createHash('md5').update(body).digest();
+    const encode=s=>encodeURIComponent(String(s)).replace(/[!'()]/g,c=>'%'+c.charCodeAt(0).toString(16).toUpperCase());
+    for(let offset=0;offset<1024;offset++) {
+        const query=pairs.concat([['_rticket',String(now+offset)]]).map(p=>encode(p[0])+'='+encode(p[1])).join('&');
+        if((getIv(getIv(getIv(0x20230928,sm3(query)),bodyHash),le32(ts))&15)!==12)continue;
+        const url=base+'?'+query;
+        return JSON.stringify({url,headers:{'x-khronos':String(ts),'x-helios':heliosV5(ts),'x-medusa':medusaV5(url,body,ts,device)}});
+    }
+    throw new Error('v5 signature unavailable');
+}
 function hgSignedPlaybackV5(base,pairsJSON,bodyBase64,deviceJSON,now) {
     const pairs=JSON.parse(pairsJSON).filter(p=>p[0]!=='_rticket'), device=JSON.parse(deviceJSON), body=Buffer.from(bodyBase64,'base64');
     const ts=Math.floor(now/1000), bodyHash=crypto.createHash('md5').update(body).digest();

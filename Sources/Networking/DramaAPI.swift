@@ -252,6 +252,7 @@ actor DramaAPI {
         let retryDeadline = ProcessInfo.processInfo.systemUptime + Self.playbackBudget
         return try await playbackTrack(
             identity: { [self] in try await freshPlaybackIdentity() },
+            tabV5: { [self] identity in try await readTabPlaybackV5(episodeID: episodeID, identity: identity) },
             mobile: { [self] identity in try await readMobilePlayback(episodeID: episodeID, identity: identity) },
             single: { [self] identity in try await readSinglePlayback(episodeID: episodeID, identity: identity) },
             read: { [self] route, identity in
@@ -444,6 +445,7 @@ actor DramaAPI {
                        now: @Sendable () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
                        pause: @Sendable () async throws -> Void = { try await Task.sleep(nanoseconds: 300_000_000) },
                        identity newIdentity: @Sendable () async throws -> RegisteredIdentity,
+                       tabV5: (@Sendable (RegisteredIdentity) async throws -> PlaybackRead)? = nil,
                        mobile: (@Sendable (RegisteredIdentity) async throws -> PlaybackRead)? = nil,
                        single: (@Sendable (RegisteredIdentity) async throws -> PlaybackRead)? = nil,
                        read: @Sendable (PlaybackRoute, RegisteredIdentity) async throws -> PlaybackRead,
@@ -459,6 +461,31 @@ actor DramaAPI {
         var onlyEmpty = true
         defer { lastPlaybackTrace = trace.joined(separator: " ") }
         let label = mobile == nil ? "S" : "M"
+        if let tabV5 {
+            // 2026-11-20 起：video_tab 的 v5 无正文 GET 是唯一可用的取源路径，先试它；
+            // 除取消外的任何失败都按原顺序继续既有梯队（对齐 hongguo-android PR #12 的
+            // AppSource.fetch 中的 fetchTabV5 前置尝试）。
+            try Task.checkCancellation()
+            if now() - started < budget {
+                do {
+                    switch try await tabV5(identity) {
+                    case .empty: trace.append("T=0B")
+                    case .invalid: onlyEmpty = false; trace.append("T=invalid")
+                    case .model(let value):
+                        onlyEmpty = false
+                        do {
+                            let track = try await use(value)
+                            try Task.checkCancellation()
+                            if successfulPlaybackIdentity == nil { successfulPlaybackIdentity = identity }
+                            trace.append("T=ok")
+                            return track
+                        } catch is CancellationError { throw CancellationError()
+                        } catch { try Task.checkCancellation(); trace.append("T=unusable"); modelFailure = modelFailure ?? error }
+                    }
+                } catch is CancellationError { throw CancellationError()
+                } catch { try Task.checkCancellation(); trace.append("T=failed") }
+            }
+        }
         if let primary = mobile ?? single {
             // An empty body can be transient. Give the current episode one more read
             // in the same session, leaving time for the existing fallback readers.
@@ -611,6 +638,24 @@ actor DramaAPI {
         guard let response = try? ProtocolJSON.object(data) else { return .invalid }
         guard ProtocolJSON.integer(response["code"] ?? response["Code"]) == 0 else { throw HGError.message(Self.rejectedPlayback) }
         return .model(ProtocolJSON.dictionary(ProtocolJSON.dictionary(ProtocolJSON.dictionary(response["data"])[episodeID])["video_model"]))
+    }
+
+    /// video_tab 的 v5 无正文 GET 取源：2026-11-20 起 player/v1 的 v5 POST 与旧的签名
+    /// video_tab 都只回空正文，这条路径是当前唯一可用的（同步自 jackotom/hongguo-drama
+    /// 7.7 / hongguo-android PR #12）。响应为 `data.video_model_data[vid].video_model`，
+    /// 复用 `tabVideoModel` 解析。
+    private func readTabPlaybackV5(episodeID: String, identity: RegisteredIdentity) async throws -> PlaybackRead {
+        let device = Self.mobileDevice(identity)
+        let signed = try await signer.signedPlaybackGetV5(baseURL: Self.videoTabV5URL,
+            query: try Self.videoTabV5Query(identity, episodeID: episodeID), device: device,
+            now: Int64(Date().timeIntervalSince1970 * 1000))
+        var headers = signed.headers
+        headers["User-Agent"] = Self.videoTabV5UserAgent
+        headers["Accept"] = "application/json"
+        let data = try await fetch(url: signed.url, body: nil, headers: headers, timeout: 8, playback: true)
+        guard !data.isEmpty else { return .empty }
+        try Self.checkPlaybackBusinessRejection(data)
+        return try Self.tabVideoModel(data, episodeID: episodeID).map { .model($0) } ?? .invalid
     }
 
     private func readMobilePlayback(episodeID: String, identity: RegisteredIdentity) async throws -> PlaybackRead {
