@@ -40,7 +40,8 @@ final class DanmakuView: UIView {
     private var currentCrossMs: Double
     private var effect = DanmakuPrefs.effectDefault
     private let gap: CGFloat = 24
-    private let displayLink: CADisplayLink
+    /// Created after `super.init` (the selector targets self), then registered in `init`.
+    private lazy var displayLink: CADisplayLink = CADisplayLink(target: self, selector: #selector(stepFrame))
     private var textAttributes: [NSAttributedString.Key: Any] = [:]
     private var outlineAttributes: [NSAttributedString.Key: Any] = [:]
     private var blocked: (String) -> Bool = { _ in false }  // 保持签名一致
@@ -48,15 +49,13 @@ final class DanmakuView: UIView {
     init(crossMs: Double = 9_000) {
         self.baseCrossMs = crossMs
         self.currentCrossMs = crossMs
-        let link = CADisplayLink(target: self, selector: #selector(stepFrame))
-        self.displayLink = link
         super.init(frame: .zero)
         isUserInteractionEnabled = false
         isAccessibilityElement = false
         isHidden = true
         applyPrefs(opacityPct: DanmakuPrefs.opacityDefault, font: DanmakuPrefs.fontDefault,
                    speed: DanmakuPrefs.speedDefault, effect: DanmakuPrefs.effectDefault)
-        link.add(to: .main, forMode: .common)
+        displayLink.add(to: .main, forMode: .common)
     }
 
     @available(*, unavailable) required init?(coder: NSCoder) { fatalError(" unsupported") }
