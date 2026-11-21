@@ -48,14 +48,15 @@ final class DanmakuView: UIView {
     init(crossMs: Double = 9_000) {
         self.baseCrossMs = crossMs
         self.currentCrossMs = crossMs
-        self.displayLink = CADisplayLink(target: self, selector: #selector(stepFrame))
+        let link = CADisplayLink(target: self, selector: #selector(stepFrame))
+        self.displayLink = link
         super.init(frame: .zero)
         isUserInteractionEnabled = false
         isAccessibilityElement = false
         isHidden = true
         applyPrefs(opacityPct: DanmakuPrefs.opacityDefault, font: DanmakuPrefs.fontDefault,
                    speed: DanmakuPrefs.speedDefault, effect: DanmakuPrefs.effectDefault)
-        displayLink.add(to: .main, forMode: .common)
+        link.add(to: .main, forMode: .common)
     }
 
     @available(*, unavailable) required init?(coder: NSCoder) { fatalError(" unsupported") }
