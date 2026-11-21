@@ -79,6 +79,8 @@ final class AppModel: ObservableObject {
     @Published var autoNext: Bool { didSet { UserDefaults.standard.set(autoNext, forKey: "autoNext") } }
     @Published var preloadNext: Bool { didSet { UserDefaults.standard.set(preloadNext, forKey: "preloadNext") } }
     @Published var speed: Float { didSet { UserDefaults.standard.set(speed, forKey: "speed") } }
+    /// 弹幕参数快照；每一项落盘一次，键名与 Android 端保持同一语义（coverage 用千分数）。
+    @Published var danmaku: DanmakuSettings { didSet { Self.storeDanmaku(danmaku) } }
     @Published var tab = 0
     @Published var systemDark = UITraitCollection.current.userInterfaceStyle == .dark
     @Published var playback: PlaybackRequest?
@@ -124,7 +126,33 @@ final class AppModel: ObservableObject {
         preloadNext = defaults.object(forKey: "preloadNext") as? Bool ?? false
         let saved = defaults.float(forKey: "speed")
         speed = [Float(0.5), 0.75, 1, 1.25, 1.5, 2].contains(saved) ? saved : 1
+        danmaku = Self.loadDanmaku(defaults).normalized()
     }
+
+    private static func loadDanmaku(_ defaults: UserDefaults) -> DanmakuSettings {
+        let permille = defaults.integer(forKey: "danmaku_coverage_permille")
+        return DanmakuSettings(
+            enabled: defaults.object(forKey: "danmaku_enabled") as? Bool ?? true,
+            coverage: permille > 0 ? DanmakuPrefs.coverageFromPermille(permille) : DanmakuPrefs.coverageDefault,
+            font: DanmakuPrefs.font(defaults.integer(forKey: "danmaku_font")),
+            opacity: DanmakuPrefs.opacity(defaults.integer(forKey: "danmaku_opacity")),
+            effect: DanmakuPrefs.effect(defaults.integer(forKey: "danmaku_effect")),
+            speed: DanmakuPrefs.speed(defaults.integer(forKey: "danmaku_speed")))
+    }
+
+    private static func storeDanmaku(_ next: DanmakuSettings) {
+        let defaults = UserDefaults.standard
+        let normalized = next.normalized()
+        defaults.set(normalized.enabled, forKey: "danmaku_enabled")
+        defaults.set(DanmakuPrefs.coveragePermille(normalized.coverage), forKey: "danmaku_coverage_permille")
+        defaults.set(normalized.font, forKey: "danmaku_font")
+        defaults.set(normalized.opacity, forKey: "danmaku_opacity")
+        defaults.set(normalized.effect, forKey: "danmaku_effect")
+        defaults.set(normalized.speed, forKey: "danmaku_speed")
+    }
+
+    /// Stores every danmaku preference at once; values are clamped before they reach disk.
+    func setDanmaku(_ next: DanmakuSettings) { danmaku = next.normalized() }
 
     func play(_ detail: DramaDetail, index: Int? = nil, resume: LibraryEntry? = nil) {
         guard !detail.episodes.isEmpty else { openError = "这部剧暂时没有可播放剧集。"; return }

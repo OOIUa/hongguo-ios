@@ -10,6 +10,7 @@ struct PlayerScreen: View {
     @StateObject private var surface = PlayerSurface()
     @State private var episodesVisible = false
     @State private var speedsVisible = false
+    @State private var danmakuVisible = false
     /// 短剧详情 over the player; the episode waits paused underneath and goes on when the sheet closes.
     @State private var detailVisible = false
     @State private var resumeAfterDetail = false
@@ -104,6 +105,7 @@ struct PlayerScreen: View {
         .preferredColorScheme(.dark).statusBarHidden(landscape).persistentSystemOverlays(landscape && chromeHidden ? .hidden : .automatic)
             .sheet(isPresented: $episodesVisible) { episodeSheet }
             .sheet(isPresented: $speedsVisible) { speedSheet }
+            .sheet(isPresented: $danmakuVisible) { danmakuSheet }
             .sheet(isPresented: $detailVisible, onDismiss: detailClosed) { detailSheet }
             .task {
                 surface.bind(session)
@@ -223,6 +225,24 @@ struct PlayerScreen: View {
         ZStack {
             Color.black
             PlayerSurfaceView(surface: surface)
+            // 弹幕在画面之上、手势层之下：开关和设置都不影响单击、双击与长按手势。
+            // 带子从顶部开始（竖屏让出顶栏，横屏贴顶），底部信息区不受影响。
+            if session.app.danmaku.enabled, !surface.pipActive, session.duration > 0 {
+                let headerPad: CGFloat = landscape ? 0 : (pageHeight < 420 ? 58 : 70)
+                let coverage = CGFloat(session.app.danmaku.coverage)
+                let band = max(0, (pageHeight - headerPad) * CGFloat(DanmakuPrefs.coverageFractions[Int(coverage)]))
+                let slack = CGFloat(18 * DanmakuPrefs.fontScale(session.app.danmaku.font)) * 0.8
+                if band > 0 {
+                    DanmakuOverlay(seriesID: session.detail.drama.id, episodeID: session.episode.id,
+                        durationSeconds: session.duration, player: session.player,
+                        settings: session.app.danmaku, bandHeight: band)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: band + slack)
+                        .offset(y: headerPad)
+                        .allowsHitTesting(false)
+                        .transition(.opacity)
+                }
+            }
             // Fade the picture in once its first frame is on screen instead of popping from black; cover instantly on switch.
             Color.black.opacity(session.rendered ? 0 : 1).animation(session.rendered ? Animation.easeOut(duration: 0.24) : nil, value: session.rendered)
             if !session.rendered && (dragging || sliding) { EpisodePlaceholder(number: session.episode.index, title: session.detail.drama.title) }
@@ -322,6 +342,9 @@ struct PlayerScreen: View {
                 Button(action: session.toggle) { Image(systemName: session.isPlaying ? "pause.fill" : "play.fill").frame(width: 38, height: 44).contentShape(Rectangle()) }.disabled(session.player == nil).accessibilityLabel(session.isPlaying ? "暂停" : "播放")
                 Button(action: session.next) { Image(systemName: "forward.end.fill").frame(width: 38, height: 44).contentShape(Rectangle()) }.disabled(session.index + 1 >= session.detail.episodes.count).accessibilityLabel("下一集")
                 Spacer(minLength: 0)
+                DanmakuControl(enabled: session.app.danmaku.enabled,
+                    onToggle: { session.app.setDanmaku(session.app.danmaku.copy(enabled: !session.app.danmaku.enabled)) },
+                    onSettings: { danmakuVisible = true })
                 Button { speedsVisible = true } label: { Text(String(format: "%g×", session.app.speed)).font(.subheadline.weight(.semibold)).frame(minWidth: 52, minHeight: 44).contentShape(Rectangle()) }.accessibilityLabel("播放倍速").accessibilityValue(String(format: "%g×", session.app.speed)).accessibilityIdentifier("player.speed")
                 Button { episodesVisible = true } label: { Label("选集", systemImage: "square.grid.2x2").font(.subheadline.weight(.semibold)).frame(minHeight: 44).contentShape(Rectangle()) }.accessibilityIdentifier("player.episodes")
                 if landscape {
@@ -348,6 +371,13 @@ struct PlayerScreen: View {
 
     private var speedSheet: some View {
         NavigationStack { List { ForEach([Float(0.5), 0.75, 1, 1.25, 1.5, 2], id: \.self) { speed in Button { session.setSpeed(speed); speedsVisible = false } label: { HStack { Text(String(format: "%g×", speed)); Spacer(); if session.app.speed == speed { Image(systemName: "checkmark").foregroundStyle(Color(hex: 0xF08058)) } }.foregroundStyle(.white).frame(minHeight: 33) } } }.navigationTitle("播放倍速").navigationBarTitleDisplayMode(.inline).toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { speedsVisible = false } } } }.presentationDetents([.height(405)]).presentationDragIndicator(.visible).preferredColorScheme(.dark)
+    }
+
+    private var danmakuSheet: some View {
+        NavigationStack { DanmakuSettingsPanel(model: session.app)
+            .navigationTitle("弹幕设置").navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { danmakuVisible = false } } }
+        }.presentationDetents([.height(360)]).presentationDragIndicator(.visible).preferredColorScheme(.dark)
     }
 }
 

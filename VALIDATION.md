@@ -1,5 +1,12 @@
 # iOS 验证记录
 
+## 0.1.30 / build 31：官方弹幕（2026-11-21）
+
+- 来源：同步 hongguo-android 0.7.32（PR #13；原始来源 tsukiyo-zero/hongguoTV、jycao2/hongguoTV，GPL-3.0-only）。播放页新增官方弹幕：30 秒窗口预取、固定行距滚动渲染、设置面板（开关、屏幕占比、字体大小、不透明度、文字效果、移动速度、恢复默认），emoji 代码展开为 Unicode 表情，U+FFFC 贴纸占位剔除。
+- 结构：`Sources/Danmaku/` 五个文件——`DanmakuRepository`（actor，30 秒窗口 + 窗内分页、主机与签名形态轮换自愈、风控冷却、节流）、`DanmakuLoader`（提前 60 秒缓冲、快进跳过、1s/4s/15s 退避、连续 10 次失败放弃）、`DanmakuView`（CADisplayLink 滚动层，轨道分配与 Android 同算法）、`DanmakuPrefs`/`DanmakuSettings`（千分数落盘，键名与 Android 同语义）、`DanmakuEmoji`；UI 层 `DanmakuOverlay`（UIViewRepresentable，periodic time observer 缓存位置避免每帧查询播放器）与 `DanmakuPanels`（底部栏「弹」开关+齿轮入口、设置 sheet）。`AppModel.danmaku` 落盘，`PlayerView` 画面上方、手势层之下挂弹幕带（竖屏让出顶栏，横屏贴顶）。
+- 离线：`test-network` 新增 `DanmakuChecks`（emoji 展开与簇区间、去重排序、风控冷却解析、退避阶梯、参数夹取、千分数往返）并纳入 Danmaku 纯逻辑四文件，与既有 v5/video_tab 套件同跑全过；account-rules、updates、library、media、progressive 及 10 项源生成检查无回归。
+- 渲染层（DanmakuView/Overlay/面板）与工程由发布工作流 xcode-27 构建验证；本机 Xcode 27.2 对 SwiftUI 宏展开存在环境限制（未改动基线同样失败），不计为移植问题。弹幕的真实取流与在屏渲染待实体 iPhone 验收；评论接口对模拟器设备身份可能风控冷却，Android 端同环境曾出现。
+
 ## 0.1.29 / build 30：video_tab v5 无正文 GET 取源（2026-11-21）
 
 - 来源：同步 hongguo-android PR #12（jackotom/hongguo-drama 7.7，GPL-3.0-only）。2026-11-20 起上游取源接口变更，`player/v1` 的 v5 POST 与旧签名 `video_tab` 一律返回 HTTP 200 + 空正文，0.1.28 及更早版本触发「播放服务连续返回空响应」。

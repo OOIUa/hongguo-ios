@@ -1,10 +1,10 @@
 {
-  "version": "0.1.29",
-  "build": 30,
+  "version": "0.1.30",
+  "build": 31,
   "repository": "OOIUa/hongguo-ios",
   "minimumOSVersion": "17.0",
   "minimumBuildSDK": "27.1",
   "releaseNotes": [
-    "修复取源接口变更后无法获取剧集播放地址的问题：默认改用 video_tab 的 v5 无正文 GET 路径取源，并保留原有备用接口顺序。"
+    "新增官方弹幕：看剧时可显示平台时间轴评论，弹幕设置支持屏幕占比、字体大小、不透明度、文字效果和移动速度。"
   ]
 }
