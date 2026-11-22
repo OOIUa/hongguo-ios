@@ -63,20 +63,25 @@ private func checkPlaybackHTTPResponses() async throws {
     }
 
     func expectTransportFailure(_ attempt: URLRequest, playback: Bool, code: URLError.Code,
-                                expectedCalls: Int, delay: UInt64 = 0, retryDeadline: TimeInterval = .infinity) async throws {
+                                expectedCalls: Int, delay: UInt64 = 0, retryDeadline: TimeInterval? = nil,
+                                expectedCode: URLError.Code? = nil) async throws {
         var calls = 0
         do {
-            _ = try await DramaAPI.responseData(for: attempt, playback: playback, retryDeadline: retryDeadline) { _ in
-                calls += 1
-                if delay > 0 { try await Task.sleep(nanoseconds: delay) }
-                throw URLError(code)
+            _ = try await DramaAPI.$playbackDeadline.withValue(retryDeadline) {
+                try await DramaAPI.responseData(for: attempt, playback: playback) { _ in
+                    calls += 1
+                    if delay > 0 { try await Task.sleep(nanoseconds: delay) }
+                    throw URLError(code)
+                }
             }
             preconditionFailure("Transport failure accepted")
-        } catch let error as URLError { precondition(error.code == code && calls == expectedCalls) }
+        } catch is CancellationError { precondition(code == .cancelled && calls == expectedCalls) }
+        catch let error as URLError { precondition(error.code == (expectedCode ?? code) && calls == expectedCalls) }
     }
     try await expectTransportFailure(request, playback: true, code: .cannotConnectToHost, expectedCalls: 2)
     try await expectTransportFailure(request, playback: true, code: .cannotDecodeRawData, expectedCalls: 1)
     try await expectTransportFailure(request, playback: true, code: .cancelled, expectedCalls: 1)
+    try await expectTransportFailure(request, playback: true, code: .timedOut, expectedCalls: 1)
     try await expectTransportFailure(request, playback: false, code: .networkConnectionLost, expectedCalls: 1)
     var post = request
     post.httpMethod = "POST"
@@ -85,10 +90,31 @@ private func checkPlaybackHTTPResponses() async throws {
     var expiring = request
     expiring.timeoutInterval = 0.001
     try await expectTransportFailure(expiring, playback: true, code: .cannotConnectToHost,
-                                     expectedCalls: 1, delay: 10_000_000)
+                                     expectedCalls: 1, delay: 10_000_000, expectedCode: .timedOut)
     // The episode lookup can run out of time while the individual GET still has most of its second left.
     try await expectTransportFailure(request, playback: true, code: .cannotConnectToHost, expectedCalls: 1,
-                                     delay: 10_000_000, retryDeadline: ProcessInfo.processInfo.systemUptime + 0.001)
+                                     delay: 10_000_000, retryDeadline: ProcessInfo.processInfo.systemUptime + 0.001,
+                                     expectedCode: .timedOut)
+
+    for initial in [request, post] {
+        _ = try await DramaAPI.withPlaybackBudget(0.25) {
+            try await DramaAPI.responseData(for: initial, playback: true) { attempt in
+                precondition(attempt.timeoutInterval > 0 && attempt.timeoutInterval <= 0.25)
+                return (payload, ok)
+            }
+        }
+        try await expectTransportFailure(initial, playback: true, code: .timedOut, expectedCalls: 0,
+                                         retryDeadline: ProcessInfo.processInfo.systemUptime - 1)
+    }
+    // The request can stay active longer than its timeout interval when data arrives in small chunks.
+    do {
+        try await DramaAPI.withPlaybackBudget(0.03) {
+            do { try await Task.sleep(for: .seconds(2)) }
+            catch { precondition(Task.isCancelled); throw error }
+            preconditionFailure("The active request outlived the episode deadline")
+        } as Void
+        preconditionFailure("A late response was accepted")
+    } catch let error as URLError { precondition(error.code == .timedOut) }
 
     let cancelled = Task {
         var calls = 0
@@ -104,11 +130,11 @@ private func checkPlaybackHTTPResponses() async throws {
     try await cancelled.value
 
     for (status, headers) in [(200, ["Retry-After": "5"]), (503, ["Retry-After": "5"]),
-                              (403, [:]), (429, [:])] {
+                              (502, ["Retry-After": "5"]), (401, [:]), (403, [:]), (429, [:])] {
         let reply = HTTPURLResponse(url: url, statusCode: status, httpVersion: nil, headerFields: headers)!
         var calls = 0
         do {
-            _ = try await DramaAPI.responseData(for: request, playback: true) { _ in calls += 1; return (Data(), reply) }
+            _ = try await DramaAPI.responseData(for: request, playback: true) { _ in calls += 1; return (payload, reply) }
             preconditionFailure("Server backoff or refusal accepted")
         } catch is DramaAPI.PlaybackRefusal { precondition(calls == 1) }
     }

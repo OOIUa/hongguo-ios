@@ -62,6 +62,12 @@ struct PlayerScreen: View {
                     SeekDragBadge(target: session.previewPosition, duration: session.duration, delta: session.previewPosition - start)
                         .allowsHitTesting(false).transition(.opacity).zIndex(1.7)
                 }
+                // 长按 2×:控制栏淡出后,顶部中央提示加速进行中;开始拖动时由 SeekDragBadge 接管。
+                if session.holding {
+                    HoldSpeedBadge()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top).padding(.top, 8)
+                        .allowsHitTesting(false).transition(.opacity).zIndex(2.5)
+                }
                 if fullScreenOffered {
                     GeometryReader { full in
                         let pictureHeight = min(full.size.height, full.size.width * session.videoSize.height / session.videoSize.width)

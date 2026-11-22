@@ -43,8 +43,13 @@ enum PlaybackRegistration {
                        "sdk-version":"2", "passport-sdk-version":"5051452", "x-neptune":"-8|50:51:59:30:40:47:49:39",
                        "x-ss-stub":HGCrypto.md5(body).hexString.uppercased()]
         for (name, value) in headers { request.setValue(value, forHTTPHeaderField: name) }
-        let (data, response) = try await session.data(for: request)
+        let deadline = DramaAPI.playbackDeadline
+        let (data, response) = try await session.data(for: DramaAPI.boundedRequest(request, until: deadline))
         try Task.checkCancellation()
+        if deadline != nil, let http = response as? HTTPURLResponse {
+            try DramaAPI.checkPlaybackHTTP(http)
+            try DramaAPI.checkPlaybackBusinessRejection(data)
+        }
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else { throw HGError.message("匿名设备注册暂时不可用") }
         let object: [String: Any]
         do { object = try ProtocolJSON.object(data) } catch { throw HGError.message("匿名设备注册响应无效") }

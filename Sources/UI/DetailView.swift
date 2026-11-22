@@ -13,6 +13,7 @@ struct DetailView: View {
     @State private var showFullSummary = false
     @State private var related: [RelatedWork] = []
     @State private var reserving: RelatedWork?
+    @State private var castIntroID: String?
 
     var body: some View {
         ScrollView {
@@ -31,6 +32,7 @@ struct DetailView: View {
                     VStack(alignment: .leading, spacing: 12) { SectionHeading(title: "故事简介"); Text(summary).font(.subheadline).foregroundStyle(model.appearance.muted).lineSpacing(5).lineLimit(showFullSummary ? nil : 4); if summary.count > 90 { Button(showFullSummary ? "收起" : "展开全部") { showFullSummary.toggle() }.font(.caption.weight(.semibold)).foregroundStyle(model.appearance.accent) } }
                         .padding(18).background(model.appearance.surface, in: RoundedRectangle(cornerRadius: 18))
                 }
+                if let cast = detail?.cast, !cast.isEmpty { castSection(cast) }
                 if loading { ProgressView("正在获取完整选集…").frame(maxWidth: .infinity).padding(30) }
                 if let message = account.message { Text(message).font(.caption).foregroundStyle(model.appearance.muted) }
                 if let error { FailureView(message: error) { Task { await load() } } }
@@ -141,6 +143,42 @@ struct DetailView: View {
         else { NavigationLink { AccountView() } label: { Text("登录后预约").font(.caption.weight(.semibold)).foregroundStyle(model.appearance.accent).frame(minHeight: 32) } }
     }
 
+    /// 演员表:来自上游详情响应的 celebrities 数据;点演员卡展开其简介,上游没给数据时整个区块不出现。
+    private func castSection(_ cast: [CastMember]) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            SectionHeading(title: "演员表", subtitle: "共 \(cast.count) 位")
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(alignment: .top, spacing: 16) {
+                    ForEach(cast) { member in castCard(member) }
+                }.padding(.vertical, 2)
+            }
+            if let member = cast.first(where: { $0.id == castIntroID }), !member.intro.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(member.nickname).font(.caption.weight(.semibold)).foregroundStyle(model.appearance.accent)
+                    Text(member.intro).font(.caption).foregroundStyle(model.appearance.muted).lineSpacing(4).fixedSize(horizontal: false, vertical: true)
+                }.padding(.top, 2).transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+        .padding(18).background(model.appearance.surface, in: RoundedRectangle(cornerRadius: 18))
+        .animation(.easeOut(duration: 0.18), value: castIntroID)
+    }
+
+    private func castCard(_ member: CastMember) -> some View {
+        Button {
+            guard !member.intro.isEmpty else { return }
+            castIntroID = castIntroID == member.id ? nil : member.id
+        } label: {
+            VStack(spacing: 6) {
+                CastAvatar(member: member, highlighted: castIntroID == member.id)
+                Text(member.nickname).font(.caption.weight(.semibold)).foregroundStyle(model.appearance.ink).lineLimit(1)
+                Text(member.roleName.isEmpty ? "演员" : "饰 \(member.roleName)").font(.caption2).foregroundStyle(model.appearance.muted).lineLimit(1)
+            }.frame(width: 72)
+        }.buttonStyle(.plain)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(member.roleName.isEmpty ? "演员 \(member.nickname)" : "演员 \(member.nickname)，饰演 \(member.roleName)")
+        .accessibilityHint(member.intro.isEmpty ? "" : "点按查看简介")
+    }
+
     private func load() async {
         loading = true; error = nil
         do {
@@ -151,5 +189,27 @@ struct DetailView: View {
             loading = false
         } catch is CancellationError { }
         catch { loading = false; self.error = friendlyError(error) }
+    }
+}
+
+/// 演员头像;缺失或加载失败时显示名字首字,占位与海报使用同一组暖色。
+private struct CastAvatar: View {
+    let member: CastMember
+    var highlighted = false
+    var body: some View {
+        AsyncImage(url: URL(string: member.avatarURL)) { phase in
+            if let image = phase.image {
+                image.resizable().scaledToFill()
+            } else {
+                ZStack {
+                    LinearGradient(colors: [Color(hex: 0xDDC3AF), Color(hex: 0x8E7062)], startPoint: .topLeading, endPoint: .bottomTrailing)
+                    Text(String(member.nickname.prefix(1))).font(.system(size: 22, weight: .semibold)).foregroundStyle(.white.opacity(0.95))
+                }
+            }
+        }
+        .frame(width: 52, height: 52)
+        .clipShape(Circle())
+        .overlay(Circle().strokeBorder(Color(hex: 0x8E7062).opacity(highlighted ? 0.55 : 0.25), lineWidth: highlighted ? 1.5 : 1))
+        .animation(.easeOut(duration: 0.18), value: highlighted)
     }
 }

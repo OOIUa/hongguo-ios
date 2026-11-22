@@ -3,14 +3,14 @@
 import Foundation
 
 enum MediaError: LocalizedError {
-    case invalidMedia, unsupported, invalidKey, tooLarge, transport, unavailable
+    case invalidMedia, unsupported, invalidKey, tooLarge, transport, temporaryCDNFailure, unavailable
     var errorDescription: String? {
         switch self {
         case .invalidMedia: return "视频文件不完整或格式损坏，请重试。"
         case .unsupported: return "此视频的封装或加密格式暂不支持。"
         case .invalidKey: return "暂时无法解析本集播放信息，请尝试其他剧集。"
         case .tooLarge: return "本集视频超过 512 MB 缓存限制。"
-        case .transport: return "视频下载失败，请检查网络后重试。"
+        case .transport, .temporaryCDNFailure: return "视频下载失败，请检查网络后重试。"
         case .unavailable: return "此视频暂时无法播放。"
         }
     }

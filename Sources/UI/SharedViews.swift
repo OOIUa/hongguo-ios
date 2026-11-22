@@ -120,6 +120,15 @@ struct ChoiceChip: View {
     }
 }
 
+/// 长按 2× 的屏幕提示,沉浸信息流与全屏播放器共用;按住期间显示,松手淡出。
+struct HoldSpeedBadge: View {
+    var body: some View {
+        Label("2× 临时加速中", systemImage: "forward.fill").font(.caption.bold()).foregroundStyle(.white)
+            .padding(.horizontal, 13).padding(.vertical, 8).background(.black.opacity(0.5), in: Capsule())
+            .accessibilityElement(children: .combine).accessibilityLabel("2× 临时加速播放中")
+    }
+}
+
 struct SectionHeading: View {
     let title: String
     var subtitle: String? = nil

@@ -25,6 +25,78 @@ private final class RangeProbeProtocol: URLProtocol {
     override func stopLoading() { }
 }
 
+private final class MirrorProbe: URLProtocol {
+    static var hosts: [String] = []
+    static var status = 206
+    static var backoff = false
+    static var primaryDigest: String?
+    static var backupDigest: String?
+    static var backupSize = 4096
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        let url = request.url!, host = url.host!
+        Self.hosts.append(host)
+        let primary = host == "main.qznovelvod.com"
+        let span = String(request.value(forHTTPHeaderField: "Range")!.dropFirst(6))
+        let bounds = span.split(separator: "-").compactMap { Int($0) }
+        var headers = ["Content-Range": "bytes " + span + "/" + String(primary ? 4096 : Self.backupSize)]
+        headers["Repr-Digest"] = primary ? Self.primaryDigest : Self.backupDigest
+        if primary && Self.backoff { headers["Retry-After"] = "8" }
+        let status = primary ? Self.status : 206
+        let response = HTTPURLResponse(url: url, statusCode: status, httpVersion: "HTTP/1.1", headerFields: headers)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        if status == 206 { client?.urlProtocol(self, didLoad: Data(repeating: 7, count: bounds[1] - bounds[0] + 1)) }
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
+
+private func mirrorTransportChecks() async throws {
+    let primary = URL(string: "https://main.qznovelvod.com/movie.mp4")!
+    let backup = URL(string: "https://spare.fqnovelvod.com/movie.mp4")!
+    let config = URLSessionConfiguration.ephemeral
+    config.protocolClasses = [MirrorProbe.self]
+    let hash = "sha-256=:" + Data(repeating: 9, count: 32).base64EncodedString() + ":"
+    func session() -> MediaRangeSession {
+        MirrorProbe.hosts = []; MirrorProbe.status = 206; MirrorProbe.backoff = false
+        MirrorProbe.primaryDigest = hash; MirrorProbe.backupDigest = hash; MirrorProbe.backupSize = 4096
+        return MediaRangeSession(url: primary, backups: [URL(string: "https://untrusted.test/m.mp4")!, backup], configuration: config)
+    }
+
+    let same = session()
+    _ = try await same.read(0..<16)
+    MirrorProbe.status = 502
+    _ = try await same.read(16..<32)
+    _ = try await same.read(32..<48)
+    precondition(MirrorProbe.hosts == [primary.host!, primary.host!, backup.host!, backup.host!])
+    let first = session()
+    MirrorProbe.status = 504; MirrorProbe.backupDigest = nil
+    _ = try await first.read(0..<16)
+    precondition(MirrorProbe.hosts == [primary.host!, backup.host!])
+
+    for reason in ["digest", "size", "no-full-digest"] {
+        let different = session()
+        if reason == "no-full-digest" { MirrorProbe.primaryDigest = nil }
+        _ = try await different.read(0..<16)
+        MirrorProbe.status = 502
+        if reason == "digest" { MirrorProbe.backupDigest = "sha-256=:" + Data(repeating: 1, count: 32).base64EncodedString() + ":" }
+        if reason == "size" { MirrorProbe.backupSize = 8192 }
+        do { _ = try await different.read(16..<32, attempts: 2); throw NSError(domain: "MixedRepresentations", code: 1) }
+        catch is MediaError {}
+        if reason == "no-full-digest" { precondition(!MirrorProbe.hosts.contains(backup.host!)) }
+    }
+
+    for status in [401, 403, 429, 503] {
+        let denied = session()
+        MirrorProbe.status = status; MirrorProbe.backoff = status == 503
+        do { _ = try await denied.read(0..<16); throw NSError(domain: "IgnoredRefusal", code: status) }
+        catch MediaError.unavailable {}
+        precondition(MirrorProbe.hosts == [primary.host!])
+    }
+    print("PASS authorized clear-media mirrors: startup and mid-stream failover, full digest and byte length, no cross-host reads on refusal or missing identity")
+}
+
 func progressiveTransportChecks(root: URL) async throws {
     let url = URL(string: "https://test.qznovelvod.com/movie.mp4")!
     func configuration() -> URLSessionConfiguration {
@@ -42,10 +114,10 @@ func progressiveTransportChecks(root: URL) async throws {
     }
     precondition(!MediaRangeHTTP.allowed(URL(string: "https://x1.smtcdns.com/v.mp4")!), "a redirect target is never accepted as the first URL")
     RangeProbeProtocol.mode = "fail-twice"; RangeProbeProtocol.failures = 0
-    let recovered = try await MediaRangeHTTP.fetchRetrying(url, range: 0..<1024, configuration: configuration())
+    let recovered = try await MediaRangeSession(url: url, configuration: configuration()).read(0..<1024)
     guard recovered.data.count == 1024, RangeProbeProtocol.failures == 2 else { throw NSError(domain: "RetryDidNotRecover", code: 1) }
     RangeProbeProtocol.mode = "truncated"
-    do { _ = try await MediaRangeHTTP.fetchRetrying(url, range: 0..<1024, attempts: 2, configuration: configuration()); throw NSError(domain: "RetryHidPersistentFailure", code: 1) }
+    do { _ = try await MediaRangeSession(url: url, configuration: configuration()).read(0..<1024, attempts: 2); throw NSError(domain: "RetryHidPersistentFailure", code: 1) }
     catch is MediaError { }
     RangeProbeProtocol.mode = "valid"
     let good = try await MediaRangeHTTP.fetch(url, range: 0..<1024, configuration: configuration())
@@ -69,6 +141,8 @@ func progressiveTransportChecks(root: URL) async throws {
         guard MediaRangeHTTP.contentRange(invalid) == nil else { throw MediaError.invalidMedia }
     }
     print("PASS production HTTP ranges: exact 206/body/total, ignored Range rejected, malformed/short/oversized data, cancellation, URL policy")
+
+    try await mirrorTransportChecks()
 
     let cache = ProgressiveCache(root: root, limit: 700)
     let a = String(repeating: "a", count: 64), b = String(repeating: "b", count: 64), c = String(repeating: "c", count: 64)

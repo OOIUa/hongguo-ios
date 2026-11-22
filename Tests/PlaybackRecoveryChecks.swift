@@ -95,7 +95,7 @@ func playbackRecoveryChecks(resources: URL) async throws {
         _ = try await budgetAPI.playbackTrack(budget: 1, now: { budget.time }, pause: { budget.time = 2 }, identity: { budget.identity() },
             single: { _ in budget.singles += 1; return .empty }, read: { _,_ in fatalError("Budget exhausted") }, use: { _ in fatalError() })
         fatalError("Expired budget must fail")
-    } catch { precondition(error.localizedDescription.contains("空响应")) }
+    } catch let error as URLError { precondition(error.code == .timedOut) }
     precondition(budget.singles == 1 && budget.registered == 1)
 
     let cancelledAPI = DramaAPI(resourceDirectory: resources), cancelled = Calls()

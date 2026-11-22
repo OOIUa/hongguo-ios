@@ -264,8 +264,7 @@ private struct ImmersivePage: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity).allowsHitTesting(false)
             }
             if active && preview.holding {
-                Label("2× 临时加速中", systemImage: "forward.fill").font(.caption.bold()).foregroundStyle(.white)
-                    .padding(.horizontal, 13).padding(.vertical, 8).background(.black.opacity(0.5), in: Capsule())
+                HoldSpeedBadge()
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top).padding(.top, insets.top + 64)
                     .allowsHitTesting(false).transition(.opacity)
             }

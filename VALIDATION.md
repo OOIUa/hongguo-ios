@@ -11,6 +11,17 @@
 - Xcode 27.2 / SDK 27.2，无签名 iPhone arm64 Release 构建与 IPA 校验通过。发布仅包含本次播放修复；工作区待发布的账号资料补齐改动未合入。未做实体 iPhone 安装验收。
 - 日志 `/tmp/hongguo-v5-ios-*.log`；UI 结果 `build/v5-qa/Logs/Test/Test-HongguoQA-2026.11.16_22-35-01-+0800.xcresult`。线上发布和四份稳定清单以 GitHub Release / distribution 为准。
 
+## 待发布：账号片单名称与海报补齐（2026-11-16）
+
+- 代码缺陷：云历史先生成无海报的“剧集”占位条目，资料批次只返回部分作品时保留占位；资料整行替换会抹掉已有字段；较旧的观看记录即使带有效资料也被丢弃；刷新未复用同账号已有资料。用户确认问题位于账号片单，未读取其真实账号数据。
+- 历史、收藏、点赞按每批最多 50 个唯一作品编号补资料；部分返回或可选资料请求失败时，按字段合并当前列表与同账号已有名称、海报、简介和集数，不把已移除的旧条目重新加入列表。仅名称或仅海报的资料也可用于补齐，兼容 book_name、series_title、series_cover 等字段及转义/HTTP/相对协议图片地址。
+- 较旧记录可补名称和海报；播放集号、位置与时间仍取最新记录。资料请求前后检查账号代次，失效登录与取消仍向外传递。没有清空账号、本机记录或重新登录操作，也没有云写入。
+- `scripts/test-account-rules.sh` 通过：原账号规则及网页登录回归、新增 `AccountMetadataSelfTest`（部分返回、字段保留、资料字段、URL、进度不回退、50 条批次、无关 ID 过滤、19 位 ID 与取消）。Xcode 27.2 / iOS SDK 27.2 的无签名 iPhone Release 编译通过。
+- 日志：`/tmp/hongguo-ios-account-metadata-tests.log`、`/tmp/hongguo-ios-account-metadata-build.log`。没有受影响账号的实网验收；从未取得且上游持续不返回的资料仍需后续刷新取得。此修复尚未发布，0.1.26 不包含。
+- 追加实网检查：生产目录选取 12 部真实作品，以新注册匿名身份调用与账号片单相同的 multi-detail 资料端点，实际返回 12 条，修复后的解析取得 12 个名称、12 个海报地址，12 张海报均实际下载并经 ImageIO 解码通过，无图片 HTTP 错误。可用 `bash scripts/test-account-metadata-live.sh --live` 重现；此结果仅证明匿名真实资料与图片链路，不能代替受影响账号片单验收。
+- 真实账号测试尝试：在已有模拟器的隔离克隆中运行只读探针，原始模拟器保持关闭。加密缓存存在，但测试包访问 Keychain 返回 -34018，未恢复可用登录态；未取得真实账号片单读测结果。随后尝试的本地模拟器 ad-hoc 测试包未能启动，没有生成或使用 Apple 签名证书，也没有更改发布 IPA。隔离副本测试仅尝试资料读取，没有预约、收藏修改或进度上报。所有物理设备当前均未连接。
+- 实网日志：`/tmp/hongguo-ios-metadata-anonymous-live.log`；账号测试失败记录 `/tmp/hongguo-ios-metadata-live-report.json`。隔离副本测试失败不计入账号功能通过。
+
 - 发布完成：GitHub `v0.1.27`，无签名 IPA 1,864,015 字节，SHA-256 `faae18e097cacc21fd991b6372a1ef2d65c7ad7c49721f9018e0b9479ac366d4`。三条全能签源和应用更新清单由 `5a13d71` 同步；官方及两条代理的清单和完整 IPA 均验证大小/哈希一致，生产更新客户端实际下载校验通过。线上报告 `build/online-0.1.27-verification.json`。
 
 ## 0.1.26 / build 27：播放空响应恢复（2026-11-16）

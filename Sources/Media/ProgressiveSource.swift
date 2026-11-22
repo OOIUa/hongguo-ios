@@ -30,7 +30,8 @@ actor ProgressiveSource {
     static func open(track: VideoTrack, episodeID: String, cache: ProgressiveCache = .shared,
                      fetch: Fetch? = nil, progress: @Sendable @escaping (String, Double) -> Void = { _, _ in }) async throws -> ProgressiveSource {
         guard !episodeID.isEmpty, episodeID.count <= 64, MediaRangeHTTP.allowed(track.url) else { throw MediaError.unavailable }
-        let provider: Fetch = fetch ?? { range in try await MediaRangeHTTP.fetchRetrying(track.url, range: range) }
+        let ranges = MediaRangeSession(url: track.url, backups: track.encrypted ? [] : track.backupURLs)
+        let provider: Fetch = fetch ?? { range in try await ranges.read(range) }
         let source = ProgressiveSource(cache: cache, fetch: provider, progress: progress)
         return try await withTaskCancellationHandler(operation: {
             do {
@@ -71,7 +72,7 @@ actor ProgressiveSource {
         let descriptor = try MP4Processor.streamPlan(length: length, moovOffset: moovOffset, moov: moov,
             media: media, psshOffsets: pssh, encrypted: track.encrypted, spade: track.spadeA)
         let identity = Data((episodeID + ":" + track.definition + ":" + String(length) + ":" + track.spadeA).utf8) + moov + Data(SHA256.hash(data: first.data))
-        let key = SHA256.hash(data: identity).map { String(format: "%02x", $0) }.joined()
+        let key = SHA256.hash(data: identity + (first.representationDigests["sha-256"] ?? first.representationDigests["sha-512"] ?? Data())).map { String(format: "%02x", $0) }.joined()
         await cache.acquire(key)
         guard !closed else { await cache.release(key); throw CancellationError() }
         cacheKey = key

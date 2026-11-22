@@ -10,6 +10,8 @@ private final class ProtocolSessionDelegate: NSObject, URLSessionTaskDelegate {
 actor DramaAPI {
     static let shared = DramaAPI()
     private static let playbackBudget: TimeInterval = 20
+    // A lookup and its child requests share a deadline even while this actor serves other episodes.
+    @TaskLocal static var playbackDeadline: TimeInterval?
     private let session: URLSession
     private let delegate = ProtocolSessionDelegate()
     private let signer: ProtocolSigner
@@ -199,7 +201,7 @@ actor DramaAPI {
             }.sorted { $0.index < $1.index }
             guard !episodes.isEmpty else { throw HGError.message("暂未取得分集列表") }
             let updated = Drama(id: drama.id, title: firstText(video["series_title"], drama.title), coverURL: cleanURL(firstText(video["series_cover"], drama.coverURL)), summary: intro.isEmpty ? drama.summary : intro, episodeCount: max(episodes.count, ProtocolJSON.integer(video["episode_cnt"])))
-            let result = DramaDetail(drama: updated, episodes: episodes); cacheDetail(result); return result
+            let result = DramaDetail(drama: updated, episodes: episodes, cast: castMembers(video)); cacheDetail(result); return result
         } catch {
             try Task.checkCancellation()
             if let result = try? await webDetail(drama) { cacheDetail(result); return result }
@@ -249,18 +251,42 @@ actor DramaAPI {
         let biz: [String: Any] = ["detail_page_version":0,"device_level":1,"disable_digg_stat":false,"need_all_video_definition":true,
             "need_mp4_align":false,"use_os_player":false,"use_server_dns":false,"video_platform":1024]
         let body = try ProtocolJSON.data(["biz_param":biz,"mixed_video_id_map":["1004":[episodeID]]])
-        let retryDeadline = ProcessInfo.processInfo.systemUptime + Self.playbackBudget
-        return try await playbackTrack(
-            identity: { [self] in try await freshPlaybackIdentity() },
-            mobile: { [self] identity in try await readMobilePlayback(episodeID: episodeID, identity: identity) },
-            single: { [self] identity in try await readSinglePlayback(episodeID: episodeID, identity: identity) },
-            read: { [self] route, identity in
-                try await readPlaybackRoute(route, episodeID: episodeID, body: body, identity: identity, retryDeadline: retryDeadline)
-            },
-            use: { [self] model in
-                guard !model.isEmpty else { throw HGError.message("服务暂未返回当前分集片源") }
-                return try await modelTrack(model)
-            })
+        return try await Self.withPlaybackBudget(Self.playbackBudget) {
+            try await self.playbackTrack(
+                identity: { try await self.freshPlaybackIdentity() },
+                mobile: { identity in try await self.readMobilePlayback(episodeID: episodeID, identity: identity) },
+                single: { identity in try await self.readSinglePlayback(episodeID: episodeID, identity: identity) },
+                read: { route, identity in
+                    try await self.readPlaybackRoute(route, episodeID: episodeID, body: body, identity: identity)
+                },
+                use: { model in
+                    guard !model.isEmpty else { throw HGError.message("服务暂未返回当前分集片源") }
+                    return try await self.modelTrack(model)
+                })
+        }
+    }
+
+    static func withPlaybackBudget<T: Sendable>(_ seconds: TimeInterval,
+            operation: @escaping @Sendable () async throws -> T) async throws -> T {
+        try Task.checkCancellation()
+        guard seconds > 0 else { throw URLError(.timedOut) }
+        let deadline = ProcessInfo.processInfo.systemUptime + seconds
+        return try await withThrowingTaskGroup(of: T.self) { group in
+            group.addTask {
+                try await $playbackDeadline.withValue(deadline) { try await operation() }
+            }
+            // URLRequest.timeoutInterval measures inactivity. A slow response can keep delivering bytes.
+            group.addTask {
+                let remaining = max(0, deadline - ProcessInfo.processInfo.systemUptime)
+                try await Task.sleep(for: .seconds(remaining))
+                throw URLError(.timedOut)
+            }
+            defer { group.cancelAll() }
+            let result = try await group.next()!
+            try Task.checkCancellation()
+            guard ProcessInfo.processInfo.systemUptime < deadline else { throw URLError(.timedOut) }
+            return result
+        }
     }
 
     /// Picks a track from a playback model. Inline rows with neither a key nor a declared encryption state may use the
@@ -284,9 +310,8 @@ actor DramaAPI {
         } catch let incomplete as IncompleteEncryption {
             do {
                 return try await verifiedFallback(model, address: address, incomplete: incomplete, read: read)
-            } catch is CancellationError { throw CancellationError()
             } catch {
-                try Task.checkCancellation()
+                try Self.checkPlaybackStop(error)
                 // 2026-11-09 (Android issue #3, season 2 episodes 14, 18, …): the server leaves encrypt_info out entirely
                 // for episodes whose media is plain hvc1. When no fallback confirms a source, those undeclared rows play as
                 // plain; ProgressiveSource and MP4Processor.validate(requirePlain:) refuse an index with encv/enca/sinf/senc.
@@ -333,9 +358,8 @@ actor DramaAPI {
                     let other = try fallbackInfo(try await read(compatible))
                     try Self.confirmSameVideo(info, other)
                     return try selectTrack(other, requireEncryption: false, minimumPixels: 0)
-                } catch is CancellationError { throw CancellationError()
                 } catch {
-                    try Task.checkCancellation()
+                    try Self.checkPlaybackStop(error)
                 }
             }
             throw onlyByteVC2
@@ -409,16 +433,36 @@ actor DramaAPI {
             }
             if !spade.isEmpty && (try? SpadeKey.decode(spade)) == nil { continue }
             let candidates = [row.item["main_url"],row.item["backup_url"]].compactMap { $0 as? String } + (row.item["backup_url_list"] as? [String] ?? [])
+            let allowMirrors = seedText.isEmpty && spade.isEmpty &&
+                ["false", "0"].contains(ProtocolJSON.text(encryptInfo["encrypt"]).lowercased())
+            var urls: [URL] = []
             for candidate in candidates where !candidate.isEmpty {
                 do {
                     let address = seedText.isEmpty ? cleanURL(candidate) : try decryptURL(candidate, seed: seed)
                     let url = try checkedURL(address, domains: ["qznovelvod.com","fqnovelvod.com","douyinvod.com"])
-                    return VideoTrack(url: url, spadeA: spade, encrypted: !spade.isEmpty, definition: row.quality)
+                    if urls.isEmpty || (url.fragment == nil && !urls.contains(url)) { urls.append(url) }
+                    if !allowMirrors || urls.count == 3 { break }
                 } catch { continue }
+            }
+            if let first = urls.first {
+                return VideoTrack(url: first, spadeA: spade, encrypted: !spade.isEmpty,
+                                  definition: row.quality, backupURLs: Array(urls.dropFirst()))
             }
         }
         if incomplete, let best = rows.first { throw IncompleteEncryption(minimumPixels: best.shortSide) }
         throw HGError.message("当前分集的播放地址或解密信息暂时不可用")
+    }
+
+    /// 演员表来自详情响应的 video_data.celebrities;没有名字的条目跳过,简介去掉内联标签。
+    nonisolated func castMembers(_ video: [String: Any]) -> [CastMember] {
+        ProtocolJSON.array(video["celebrities"]).compactMap { value -> CastMember? in
+            let row = ProtocolJSON.dictionary(value)
+            let nickname = ProtocolJSON.text(row["nickname"]).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !nickname.isEmpty else { return nil }
+            return CastMember(celebrityID: ProtocolJSON.text(row["celebrity_id"]), nickname: nickname,
+                roleName: ProtocolJSON.text(row["role_name"]).trimmingCharacters(in: .whitespacesAndNewlines),
+                avatarURL: cleanURL(ProtocolJSON.text(row["avatar"])), intro: stripHTML(ProtocolJSON.text(row["intro"])))
+        }
     }
 
     private func cacheDetail(_ result: DramaDetail) {
@@ -432,7 +476,12 @@ actor DramaAPI {
     private func freshPlaybackIdentity() async throws -> RegisteredIdentity {
         if let failed = registrationFailedAt, Date().timeIntervalSince(failed) < 10 { throw HGError.message("匿名播放设备注册失败，请稍后重试") }
         do { let identity = try await PlaybackRegistration.register(session: session); registrationFailedAt = nil; return identity }
-        catch { try Task.checkCancellation(); if !(error is CancellationError) { registrationFailedAt = Date() }; throw error }
+        catch {
+            try Task.checkCancellation()
+            if error is CancellationError || (error as? URLError)?.code == .cancelled { throw CancellationError() }
+            registrationFailedAt = Date()
+            throw error
+        }
     }
 
     static let playbackHost = "api5-normal-sinfonlineb.fqnovel.com", playbackRetryHost = "api5-normal-hl.fqnovel.com"
@@ -527,7 +576,7 @@ actor DramaAPI {
             try Task.checkCancellation()
             if route.renewsIdentity {
                 do { identity = try await newIdentity(); trace.append("new") }
-                catch { try Task.checkCancellation(); trace.append("new=failed") }
+                catch { try Self.checkPlaybackStop(error); trace.append("new=failed") }
             }
             try Task.checkCancellation()
             guard now() - started < budget else { break }
@@ -564,6 +613,7 @@ actor DramaAPI {
                 if modelFailure == nil { modelFailure = error }
             }
         }
+        if now() - started >= budget { throw URLError(.timedOut) }
         if let modelFailure { throw modelFailure }
         if onlyEmpty { throw HGError.message("播放服务返回空响应，原因尚未确认，请稍后重试") }
         throw failure ?? HGError.message("服务暂未返回当前分集片源")
@@ -600,11 +650,10 @@ actor DramaAPI {
     enum PlaybackRead { case model([String: Any]), empty, invalid }
     private static let rejectedPlayback = "当前分集暂未提供播放信息"
 
-    private func readPlaybackRoute(_ route: PlaybackRoute, episodeID: String, body: Data, identity: RegisteredIdentity,
-                                   retryDeadline: TimeInterval) async throws -> PlaybackRead {
+    private func readPlaybackRoute(_ route: PlaybackRoute, episodeID: String, body: Data, identity: RegisteredIdentity) async throws -> PlaybackRead {
         let signed = try await signedPlaybackRequest(route: route, episodeID: episodeID, body: body, identity: identity)
         let data = try await fetch(url: signed.url, body: route.post ? body : nil, headers: signed.headers, timeout: 8,
-                                   playback: true, retryDeadline: retryDeadline)
+                                   playback: true)
         guard !data.isEmpty else { return .empty }
         try Self.checkPlaybackBusinessRejection(data)
         if !route.post { return Self.tabVideoModel(data, episodeID: episodeID).map { .model($0) } ?? .invalid }
@@ -780,45 +829,74 @@ actor DramaAPI {
     private func request(url: URL, body: Data?, headers: [String: String]) async throws -> [String: Any] {
         let data = try await fetch(url: url, body: body, headers: headers)
         guard !data.isEmpty else { throw HGError.message("服务返回空响应，请稍后重试") }
+        if Self.playbackDeadline != nil { try Self.checkPlaybackBusinessRejection(data) }
         do { return try ProtocolJSON.object(data) } catch { throw HGError.message("服务数据格式发生变化，请稍后重试") }
     }
     private func fetch(url: URL, body: Data? = nil, headers: [String: String], timeout: TimeInterval = 18,
-                       playback: Bool = false, retryDeadline: TimeInterval = .infinity) async throws -> Data {
+                       playback: Bool = false) async throws -> Data {
         try Task.checkCancellation()
-        let scheduled = max(Date(), nextRequestAt); nextRequestAt = scheduled.addingTimeInterval(0.26)
+        let scheduled = max(Date(), nextRequestAt)
         let wait = scheduled.timeIntervalSinceNow
+        if let deadline = Self.playbackDeadline, deadline - ProcessInfo.processInfo.systemUptime <= max(0, wait) {
+            throw URLError(.timedOut)
+        }
+        nextRequestAt = scheduled.addingTimeInterval(0.26)
         if wait > 0 { try await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000)) }
         try Task.checkCancellation()
         var request = URLRequest(url: url, timeoutInterval: timeout)
         request.httpMethod = body == nil ? "GET" : "POST"; request.httpBody = body; request.httpShouldHandleCookies = false
         for (name,value) in headers { request.setValue(value, forHTTPHeaderField: name) }
-        return try await Self.responseData(for: request, playback: playback, retryDeadline: retryDeadline) { try await session.data(for: $0) }
+        return try await Self.responseData(for: request, playback: playback) { try await session.data(for: $0) }
     }
 
-    static func responseData(for request: URLRequest, playback: Bool, retryDeadline: TimeInterval = .infinity,
+    static func boundedRequest(_ request: URLRequest, until deadline: TimeInterval?) throws -> URLRequest {
+        guard let deadline else { return request }
+        let remaining = deadline - ProcessInfo.processInfo.systemUptime
+        guard remaining > 0 else { throw URLError(.timedOut) }
+        var bounded = request
+        bounded.timeoutInterval = min(request.timeoutInterval, remaining)
+        return bounded
+    }
+
+    static func checkPlaybackStop(_ error: Error) throws {
+        try Task.checkCancellation()
+        if error is CancellationError || (error as? URLError)?.code == .cancelled { throw CancellationError() }
+        if error is PlaybackRefusal { throw error }
+    }
+
+    static func checkPlaybackHTTP(_ http: HTTPURLResponse) throws {
+        if [401, 403, 429].contains(http.statusCode) { throw PlaybackRefusal(http: http.statusCode) }
+        if let retryAfter = http.value(forHTTPHeaderField: "Retry-After"),
+           !retryAfter.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            throw PlaybackRefusal(retryAfterStatus: http.statusCode)
+        }
+    }
+
+    static func responseData(for request: URLRequest, playback: Bool,
                              send: (URLRequest) async throws -> (Data, URLResponse)) async throws -> Data {
         try Task.checkCancellation()
-        let deadline = min(retryDeadline, ProcessInfo.processInfo.systemUptime + request.timeoutInterval)
+        let episodeDeadline = playbackDeadline
+        let deadline = min(episodeDeadline ?? .infinity, ProcessInfo.processInfo.systemUptime + request.timeoutInterval)
+        func attempt(until limit: TimeInterval?) async throws -> (Data, URLResponse) {
+            let attempt = try boundedRequest(request, until: limit)
+            do {
+                return try await send(attempt)
+            } catch {
+                if playback || episodeDeadline != nil { try checkPlaybackStop(error) }
+                throw error
+            }
+        }
         let (data, response): (Data, URLResponse)
         do {
-            (data, response) = try await send(request)
+            (data, response) = try await attempt(until: episodeDeadline)
         } catch let error as URLError where playback && request.httpMethod == "GET" &&
             (error.code == .cannotConnectToHost || error.code == .networkConnectionLost) {
             try Task.checkCancellation()
-            let remaining = deadline - ProcessInfo.processInfo.systemUptime
-            guard remaining > 0 else { throw error }
-            var retry = request
-            retry.timeoutInterval = remaining
-            (data, response) = try await send(retry)
+            (data, response) = try await attempt(until: deadline)
         }
         try Task.checkCancellation()
-        if playback, let http = response as? HTTPURLResponse {
-            if [403, 429].contains(http.statusCode) { throw PlaybackRefusal(http: http.statusCode) }
-            if http.statusCode == 503 || (http.statusCode == 200 && data.isEmpty),
-               let retryAfter = http.value(forHTTPHeaderField: "Retry-After"),
-               !retryAfter.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                throw PlaybackRefusal(retryAfterStatus: http.statusCode)
-            }
+        if playback || playbackDeadline != nil, let http = response as? HTTPURLResponse {
+            try checkPlaybackHTTP(http)
         }
         guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
             throw HGError.message("服务连接失败（HTTP \((response as? HTTPURLResponse)?.statusCode ?? 0)）")
@@ -852,8 +930,8 @@ actor DramaAPI {
             "cover":firstText(vdata["cover"],inner["series_cover"]),"series_intro":firstText(inner["series_intro"],vd["series_intro"])])
     }
     private func firstText(_ values: Any?...) -> String { values.map { ProtocolJSON.text($0) }.first { !$0.isEmpty } ?? "" }
-    private func stripHTML(_ text: String) -> String { text.replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression) }
-    private func cleanURL(_ value: String) -> String { value.replacingOccurrences(of: "\\/", with: "/").replacingOccurrences(of: "\\u002F", with: "/").replacingOccurrences(of: "\\u0026", with: "&").replacingOccurrences(of: "&amp;", with: "&") }
+    nonisolated private func stripHTML(_ text: String) -> String { text.replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression) }
+    nonisolated private func cleanURL(_ value: String) -> String { value.replacingOccurrences(of: "\\/", with: "/").replacingOccurrences(of: "\\u002F", with: "/").replacingOccurrences(of: "\\u0026", with: "&").replacingOccurrences(of: "&amp;", with: "&") }
     private static func encode(_ value: String) -> String { value.addingPercentEncoding(withAllowedCharacters: CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.~")) ?? "" }
     private static func base64(_ value: String) -> Data? {
         guard !value.isEmpty else { return nil }

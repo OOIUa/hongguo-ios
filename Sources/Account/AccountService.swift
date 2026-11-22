@@ -525,34 +525,27 @@ final class AccountService: ObservableObject {
     /// Current official clients read the light `video/list` shelf and name it from the detail batch; `video/info`
     /// stays as the fallback when the light list fails, or is empty for an account still on the old logic.
     private func fetchFavorites(_ candidate: AccountCredentials) async throws -> [Drama] {
+        let ticket = generation
         let light: [String]?
         do { light = try AccountRules.favoriteList(try await appJSON(candidate, path: "/reading/bookapi/bookshelf/video/list/v1/").0) }
         catch let failure as AccountFailure where failure.expired { throw failure }
         catch is CancellationError { throw CancellationError() }
         catch { light = nil }
-        guard let ids = light else { return try await fetchLegacyFavorites(candidate) }
+        guard let ids = light else { return try await fetchLegacyFavorites(candidate, ticket: ticket) }
         if ids.isEmpty {
             // The light list already answered; the legacy shelf can only add rows, never turn that answer into an error.
-            do { return try await fetchLegacyFavorites(candidate) }
+            do { return try await fetchLegacyFavorites(candidate, ticket: ticket) }
             catch let failure as AccountFailure where failure.expired { throw failure }
             catch is CancellationError { throw CancellationError() }
             catch { return [] }
         }
         let shown = Array(ids.prefix(200))
-        var mapped = [String:Drama]()
-        for start in stride(from: 0, to: shown.count, by: 50) {
-            let batch = shown[start..<min(start + 50, shown.count)]
-            do {
-                let (metadata,_) = try await appJSON(candidate, path: "/reading/bookapi/multi-detail/v1/", params: ["book_id":batch.joined(separator: ","),"book_type":"2"])
-                for row in ProtocolJSON.array(metadata["data"]).map({ ProtocolJSON.dictionary($0) }) { if let item = drama(row: row, video: row) { mapped[item.id] = item } }
-            } catch let failure as AccountFailure where failure.expired { throw failure }
-            catch is CancellationError { throw CancellationError() }
-            catch { }
-        }
-        return shown.map { mapped[$0] ?? Drama(id: $0, title: "剧集 \($0)", coverURL: "", summary: "", episodeCount: 0) }
+        return try await enrich(shown.map { Drama(id: $0, title: "剧集 \($0)", coverURL: "", summary: "", episodeCount: 0) },
+                                candidate: candidate, ticket: ticket)
     }
 
-    private func fetchLegacyFavorites(_ candidate: AccountCredentials) async throws -> [Drama] {
+    private func fetchLegacyFavorites(_ candidate: AccountCredentials, ticket: UUID) async throws -> [Drama] {
+        guard ticket == generation else { throw CancellationError() }
         let (raw,_) = try await appJSON(candidate, path: "/reading/bookapi/bookshelf/video/info/v1/")
         let data = ProtocolJSON.dictionary(raw["data"])
         guard data["video_shelf_info"] != nil else { throw HGError.message("账户收藏数据格式发生变化") }
@@ -562,26 +555,22 @@ final class AccountService: ObservableObject {
             return drama(row: row, video: video)
         }
         guard rows.isEmpty || !result.isEmpty else { throw HGError.message("账户收藏条目格式发生变化") }
-        return unique(result)
+        return try await enrich(unique(result), candidate: candidate, ticket: ticket)
     }
     /// The endpoint intermittently answers with an empty body, so one read is repeated once.
     private func fetchLikes(_ candidate: AccountCredentials) async throws -> [Drama] {
+        let ticket = generation
         let params = ["count":"50","object_type_list":"6,15,10","offset":"0","action_type":"3"]
         let liked: [Drama]
         do { liked = AccountRules.likes(try await appJSON(candidate, path: "/reading/ugc/action/mget/v1/", params: params).0) }
         catch let failure as AccountFailure where failure.expired { throw failure }
         catch is CancellationError { throw CancellationError() }
-        catch { liked = AccountRules.likes(try await appJSON(candidate, path: "/reading/ugc/action/mget/v1/", params: params).0) }
+        catch {
+            guard ticket == generation else { throw CancellationError() }
+            liked = AccountRules.likes(try await appJSON(candidate, path: "/reading/ugc/action/mget/v1/", params: params).0)
+        }
         guard !liked.isEmpty else { return liked }
-        // The like list's video title is often the synopsis, so names come from the detail batch; a failure keeps the list.
-        var mapped = [String:Drama]()
-        do {
-            let (metadata,_) = try await appJSON(candidate, path: "/reading/bookapi/multi-detail/v1/", params: ["book_id":liked.map(\.id).joined(separator: ","),"book_type":"2"])
-            for row in ProtocolJSON.array(metadata["data"]).map({ ProtocolJSON.dictionary($0) }) { if let item = drama(row: row, video: row) { mapped[item.id] = item } }
-        } catch let failure as AccountFailure where failure.expired { throw failure }
-        catch is CancellationError { throw CancellationError() }
-        catch { }
-        return liked.map { mapped[$0.id] ?? $0 }
+        return try await enrich(liked, candidate: candidate, ticket: ticket)
     }
 
     /// Watch records add works the progress list leaves out; a failure there keeps the progress list.
@@ -592,6 +581,7 @@ final class AccountService: ObservableObject {
     }
 
     private func fetchHistory(_ candidate: AccountCredentials) async throws -> [LibraryEntry] {
+        let ticket = generation
         let (raw,_) = try await appJSON(candidate, path: "/reading/bookapi/read_progress/list/v1/", params: ["book_types":"2","limit":"50"])
         let data = ProtocolJSON.dictionary(raw["data"])
         guard let rows = (raw["video_data"] ?? data["video_data"]) as? [[String:Any]] else { throw HGError.message("账户历史数据格式发生变化") }
@@ -603,20 +593,12 @@ final class AccountService: ObservableObject {
             return LibraryEntry(drama: drama, episodeID: episode, episodeIndex: max(1, ProtocolJSON.integer(row["vid_index"])), position: max(0, (Double(ProtocolJSON.text(row["current_play_time"])) ?? 0) / 1000), updatedAt: Date(timeIntervalSince1970: stamp))
         }
         guard rows.isEmpty || !result.isEmpty else { throw HGError.message("账户历史条目格式发生变化") }
-        for record in await fetchRecords(candidate) {
-            if let index = result.firstIndex(where: { $0.id == record.id }) { if record.updatedAt > result[index].updatedAt { result[index] = record } }
-            else { result.append(record) }
+        guard ticket == generation else { throw CancellationError() }
+        result = AccountRules.mergingHistory(result + (await fetchRecords(candidate)))
+        let enriched = try await enrich(result.map(\.drama), candidate: candidate, ticket: ticket)
+        return zip(result, enriched).map { item, drama in
+            LibraryEntry(drama: drama, episodeID: item.episodeID, episodeIndex: item.episodeIndex, position: item.position, updatedAt: item.updatedAt)
         }
-        if !result.isEmpty {
-            let (metadata,_) = try await appJSON(candidate, path: "/reading/bookapi/multi-detail/v1/", params: ["book_id":result.map { $0.id }.joined(separator: ","),"book_type":"2"])
-            let items = ProtocolJSON.array(metadata["data"]).map { ProtocolJSON.dictionary($0) }
-            var mapped = [String:Drama]()
-            for row in items { if let item = drama(row: row, video: row) { mapped[item.id] = item } }
-            result = result.map { item in
-                LibraryEntry(drama: mapped[item.id] ?? item.drama, episodeID: item.episodeID, episodeIndex: item.episodeIndex, position: item.position, updatedAt: item.updatedAt)
-            }
-        }
-        return Array(result.sorted { $0.updatedAt > $1.updatedAt }.prefix(200))
     }
     private func fetchReservations(_ candidate: AccountCredentials, online: Bool) async throws -> [CloudReservation] {
         let (raw,_) = try await appJSON(candidate, path: "/reading/user/subscribe/list/v0/", params: ["offset":"0","limit":"20","is_online":String(online),"tab_type":"13","subscribe_order_type":"0","swipe_type":"0","need_calendar_schema":"false","subscribe_offset":"0"])
@@ -637,12 +619,24 @@ final class AccountService: ObservableObject {
     }
 
     private func drama(row: [String:Any], video: [String:Any]) -> Drama? {
-        func first(_ values: [Any?]) -> String { values.map { ProtocolJSON.text($0) }.first { !$0.isEmpty } ?? "" }
-        let id = first([video["series_id"],row["series_id"],row["book_id"]])
-        let title = first([row["series_title"],video["title"],row["book_name"],video["book_name"]])
-        guard ProtocolJSON.identifier(id) != nil, !title.isEmpty else { return nil }
-        let cover = first([row["series_cover_url"],video["cover"],video["cover_url"],video["thumb_url"],row["thumb_url"]]).replacingOccurrences(of: "http://", with: "https://")
-        return Drama(id: id, title: title, coverURL: cover, summary: first([row["series_intro"],video["video_desc"],row["abstract"]]), episodeCount: max(ProtocolJSON.integer(video["episode_cnt"]),ProtocolJSON.integer(video["episode_count"]),ProtocolJSON.integer(row["episode_cnt"])))
+        guard let item = AccountRules.metadataDrama(row: row, video: video), !item.title.isEmpty else { return nil }
+        return item
+    }
+
+    private func enrich(_ values: [Drama], candidate: AccountCredentials, ticket: UUID) async throws -> [Drama] {
+        guard ticket == generation else { throw CancellationError() }
+        let previous = favorites + history.map(\.drama) + likes + reservations.map(\.drama)
+        return try await AccountRules.enrichDramas(values, previous: previous) { ids in
+            guard ticket == self.generation else { throw CancellationError() }
+            do {
+                let (raw,_) = try await self.appJSON(candidate, path: "/reading/bookapi/multi-detail/v1/",
+                                                    params: ["book_id":ids.joined(separator: ","), "book_type":"2"])
+                guard ticket == self.generation else { throw CancellationError() }
+                return raw
+            } catch let failure as AccountFailure where failure.expired { throw failure }
+            catch is CancellationError { throw CancellationError() }
+            catch { try Task.checkCancellation(); return [:] }
+        }
     }
     private func unique(_ values: [Drama]) -> [Drama] {
         var seen = Set<String>(); return Array(values.filter { seen.insert($0.id).inserted }.prefix(200))

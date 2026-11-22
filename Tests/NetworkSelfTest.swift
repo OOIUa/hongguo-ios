@@ -51,6 +51,18 @@ import JavaScriptCore
             return try await DramaAPI(resourceDirectory: resources).home(feed: "recommend", offset: 0)
         }
         do { _ = try await cancelled.value; fatalError("Cancelled request was accepted") } catch is CancellationError { }
+        // 演员表: 从详情响应的 video_data.celebrities 解析;缺名字的条目跳过,头像转义与简介内联标签完成清洗。
+        let castVideo: [String: Any] = ["celebrities": [
+            ["celebrity_id": "7001", "nickname": " 范祺 ", "role_name": "沈如锦", "avatar": "https:\\/\\/p3-example.test\\/a.jpg", "intro": "<b>代表作</b>《测试》"],
+            ["nickname": "", "role_name": "应跳过"],
+            ["nickname": "聂禹琪", "role_name": "", "avatar": "", "intro": ""],
+        ]]
+        let cast = DramaAPI(resourceDirectory: resources).castMembers(castVideo)
+        precondition(cast.count == 2, "Cast entries without a nickname must be skipped")
+        precondition(cast[0].nickname == "范祺" && cast[0].roleName == "沈如锦")
+        precondition(cast[0].avatarURL == "https://p3-example.test/a.jpg", "Cast avatar escaping must be cleaned")
+        precondition(cast[0].intro == "代表作《测试》", "Cast intro HTML must be stripped")
+        precondition(cast[1].nickname == "聂禹琪" && cast[1].roleName.isEmpty && cast[1].avatarURL.isEmpty)
         // 猜你喜欢: request shape for anonymous and signed-in rounds, parsing, and pager batching.
         let anonymous = try GuessFeed.request(account: nil, session: "", offset: 0, rticket: 1)
         let anonymousQuery = URLComponents(url: anonymous.url!, resolvingAgainstBaseURL: false)!.queryItems!
@@ -329,6 +341,13 @@ import JavaScriptCore
         // ByteVC2-only episodes say so; inline rows without encryption metadata may use a fully verified fallback.
         let trackAPI = DramaAPI(resourceDirectory: resources)
         let videoRow = { (codec: String, url: String, side: Int) -> [String: Any] in ["codec_type":codec,"vwidth":side,"vheight":side * 16 / 9,"definition":"\(side)p","main_url":url] }
+        var mirrored = videoRow("h264", "https://v1.qznovelvod.com/main.mp4", 1080)
+        mirrored["encrypt_info"] = ["encrypt": false]
+        mirrored["backup_url"] = "https://v2.fqnovelvod.com/same.mp4"
+        mirrored["backup_url_list"] = ["https://untrusted.test/m.mp4", "https://v2.fqnovelvod.com/same.mp4"]
+        let singleRow = try await trackAPI.modelTrack(["video_list": [mirrored,
+            videoRow("h265", "https://v3.qznovelvod.com/other.mp4", 720)]])
+        precondition(singleRow.backupURLs.map(\.absoluteString) == ["https://v2.fqnovelvod.com/same.mp4"])
         do {
             _ = try await trackAPI.modelTrack(["video_list":[videoRow("bytevc2","https://v1.qznovelvod.com/a.mp4",1080)]])
             fatalError("A ByteVC2-only episode has no playable track")
@@ -410,6 +429,14 @@ import JavaScriptCore
         precondition(noFallback.url.absoluteString == "https://v1.qznovelvod.com/plain.mp4" && !noFallback.encrypted && noFallback.spadeA.isEmpty)
         let failedRead = try await trackAPI.modelTrack(incompleteModel) { _ in throw URLError(.timedOut) }
         precondition(failedRead.url.absoluteString == "https://v1.qznovelvod.com/nokey.mp4" && !failedRead.encrypted)
+        do {
+            _ = try await trackAPI.modelTrack(incompleteModel) { _ in throw DramaAPI.PlaybackRefusal(retryAfterStatus: 502) }
+            fatalError("A fallback that requested backoff must stop the lookup")
+        } catch is DramaAPI.PlaybackRefusal {}
+        do {
+            _ = try await trackAPI.modelTrack(incompleteModel) { _ in throw URLError(.cancelled) }
+            fatalError("A cancelled fallback must stop the lookup")
+        } catch is CancellationError {}
         // A keyed row still wins over an undeclared one of the same rank and size.
         var mixed = incompleteModel
         mixed["video_list"] = [videoRow("h264","https://v1.qznovelvod.com/nokey.mp4",1080), videoRow("h264","https://v1.qznovelvod.com/keyed.mp4",720).merging(["spade_a":spadeSample]) { $1 }]

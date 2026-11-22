@@ -15,9 +15,21 @@ struct Episode: Identifiable, Codable, Hashable, Sendable {
     let title: String
 }
 
+/// One entry of the cast list from the upstream detail payload (`video_data.celebrities`).
+struct CastMember: Identifiable, Hashable, Sendable {
+    var id: String { celebrityID.isEmpty ? nickname : celebrityID }
+    let celebrityID: String
+    let nickname: String
+    let roleName: String
+    let avatarURL: String
+    let intro: String
+}
+
 struct DramaDetail: Sendable {
     let drama: Drama
     let episodes: [Episode]
+    /// Empty when the platform returns no cast data (also true for the web fallback).
+    var cast: [CastMember] = []
 }
 
 struct DramaPage: Sendable {
@@ -31,6 +43,7 @@ struct VideoTrack: Sendable {
     let spadeA: String
     let encrypted: Bool
     let definition: String
+    var backupURLs: [URL] = []
 }
 
 struct FilterOption: Identifiable, Hashable, Sendable {
