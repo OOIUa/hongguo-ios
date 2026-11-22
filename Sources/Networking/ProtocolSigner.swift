@@ -67,6 +67,22 @@ actor ProtocolSigner {
         return SignedProtocolRequest(url: url, headers: headers)
     }
 
+    /// v5 无正文 GET 签名（video_tab 用）。正文摘要按空 body 的 MD5 计算，且只返回
+    /// x-khronos / x-helios / x-medusa 三个头；调用方不得附带 Content-Type /
+    /// Content-Encoding / x-ss-stub。对齐 hongguo-android PR #12 的 signPlaybackGet。
+    func signedPlaybackGetV5(baseURL: String, query: [[String]], device: [String: String], now: Int64) throws -> SignedProtocolRequest {
+        try Task.checkCancellation()
+        let runtime = try runtime()
+        runtime.exception = nil
+        let arguments: [Any] = [baseURL, try jsonString(query), try jsonString(device), now]
+        guard let text = runtime.objectForKeyedSubscript("hgSignedPlaybackGetV5")?.call(withArguments: arguments)?.toString(),
+              runtime.exception == nil,
+              let data = text.data(using: .utf8), let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let address = object["url"] as? String, let url = URL(string: address),
+              let headers = object["headers"] as? [String: String] else { throw HGError.message("无法生成本机请求签名") }
+        return SignedProtocolRequest(url: url, headers: headers)
+    }
+
     func signedPlaybackV5(baseURL: String, query: [[String]], body: Data, device: [String: String], now: Int64) throws -> SignedProtocolRequest {
         try Task.checkCancellation()
         let runtime = try runtime()
