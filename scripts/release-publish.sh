@@ -26,14 +26,23 @@ for suffix in ('unsigned.ipa', 'source.zip'):
 with zipfile.ZipFile(f"dist/Hongguo-iOS-{config['version']}-source.zip") as archive:
     assert archive.testzip() is None, 'Source archive is corrupt'
     assert json.loads(archive.read('hongguo-ios/Configuration/Release.json')) == config, 'Source archive is for another version'
-notes = '\n'.join('- ' + item for item in config['releaseNotes'])
+sections = config.get('releaseNotesSections')
+if isinstance(sections, dict) and sections:
+    parts = []
+    for group in ('新增', '优化', '修复'):
+        items = sections.get(group)
+        if items:
+            parts.append('### ' + group + '\n' + '\n'.join('- ' + item for item in items))
+    notes = '\n\n'.join(parts) + '\n'
+else:
+    notes = '\n'.join('- ' + item for item in config['releaseNotes']) + '\n'
 Path('build').mkdir(exist_ok=True)
-Path('build/release-notes.md').write_text(f"红果 iOS {config['version']}（build {config['build']}）\n\n{notes}\n\n未签名 IPA，需要自行签名后安装。最低 iOS {config['minimumOSVersion']}。\n\n附带对应版本源码及 SHA-256 校验文件。\n")
+Path('build/release-notes.md').write_text(notes)
 PY
 # Check before creating the draft, and again immediately before making it public.
 python3 scripts/release-common.py latest-flag "$release_repo" "$release_tag" >/dev/null
 gh release create "$release_tag" --repo "$release_repo" --verify-tag --draft \
-  --title "红果 iOS ${release_version}" --notes-file build/release-notes.md \
+  --title "${release_tag}" --notes-file build/release-notes.md \
   "$release_ipa" "${release_ipa}.sha256" "$release_source" "${release_source}.sha256" \
   distribution/update.json distribution/source.json distribution/source-cn.json distribution/source-cn-backup.json
 release_latest="$(python3 scripts/release-common.py latest-flag "$release_repo" "$release_tag")"
