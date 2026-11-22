@@ -3,24 +3,24 @@
   "message": "项目维护者发布的未签名 IPA；需要自行签名安装。",
   "identifier": "ooiua.hongguo-ios.source",
   "sourceURL": "https://raw.githubusercontent.com/OOIUa/hongguo-ios/main/distribution/source.json",
-  "sourceicon": "https://raw.githubusercontent.com/OOIUa/hongguo-ios/v0.1.30/distribution/icon.png",
+  "sourceicon": "https://raw.githubusercontent.com/OOIUa/hongguo-ios/v0.1.31/distribution/icon.png",
   "apps": [
     {
       "name": "红果独立版",
       "type": "1",
       "bundleIdentifier": "com.ooiua.hongguo.ios",
-      "version": "0.1.30",
-      "build": 31,
+      "version": "0.1.31",
+      "build": 32,
       "minimumOSVersion": "17.0",
-      "versionDate": "2026-11-21T17:00:39Z",
-      "versionDescription": "新增官方弹幕：看剧时可显示平台时间轴评论，弹幕设置支持屏幕占比、字体大小、不透明度、文字效果和移动速度。\n未签名 IPA，需使用本人的证书签名后安装。",
+      "versionDate": "2026-11-22T05:19:36Z",
+      "versionDescription": "新增详情页演员表：展示演员头像、姓名与饰演角色，点按演员可查看简介。\n优化长按 2× 加速播放：画面顶部显示提示，松手自动恢复原速。\n修复账号片单里剧集名称与海报缺失、显示占位条目的问题；观看进度与时间仍取最新记录。\n未签名 IPA，需使用本人的证书签名后安装。",
       "lock": "0",
-      "downloadURL": "https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.30/Hongguo-iOS-0.1.30-unsigned.ipa",
+      "downloadURL": "https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.31/Hongguo-iOS-0.1.31-unsigned.ipa",
       "isLanZouCloud": "0",
-      "iconURL": "https://raw.githubusercontent.com/OOIUa/hongguo-ios/v0.1.30/distribution/icon.png",
+      "iconURL": "https://raw.githubusercontent.com/OOIUa/hongguo-ios/v0.1.31/distribution/icon.png",
       "tintColor": "E8463F",
-      "size": "2004354",
-      "sha256": "d9a02230b56196c0e0821bb4333dbfbfb9cc2b5cef2816acaecc212c1ba8b1bf"
+      "size": "2054875",
+      "sha256": "fee52aca01831b862ecae255045b146fbe6e0a6bd843e94b69e9f7970b1c1b4c"
     }
   ]
 }

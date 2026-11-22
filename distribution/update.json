@@ -1,16 +1,18 @@
 {
-  "version": "0.1.30",
-  "build": 31,
+  "version": "0.1.31",
+  "build": 32,
   "minimumOSVersion": "17.0",
   "releaseNotes": [
-    "新增官方弹幕：看剧时可显示平台时间轴评论，弹幕设置支持屏幕占比、字体大小、不透明度、文字效果和移动速度。"
+    "新增详情页演员表：展示演员头像、姓名与饰演角色，点按演员可查看简介。",
+    "优化长按 2× 加速播放：画面顶部显示提示，松手自动恢复原速。",
+    "修复账号片单里剧集名称与海报缺失、显示占位条目的问题；观看进度与时间仍取最新记录。"
   ],
-  "publishedAt": "2026-11-21T17:00:39Z",
-  "downloadURL": "https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.30/Hongguo-iOS-0.1.30-unsigned.ipa",
-  "sha256": "d9a02230b56196c0e0821bb4333dbfbfb9cc2b5cef2816acaecc212c1ba8b1bf",
-  "size": 2004354,
+  "publishedAt": "2026-11-22T05:19:36Z",
+  "downloadURL": "https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.31/Hongguo-iOS-0.1.31-unsigned.ipa",
+  "sha256": "fee52aca01831b862ecae255045b146fbe6e0a6bd843e94b69e9f7970b1c1b4c",
+  "size": 2054875,
   "mirrors": {
-    "gh-proxy": "https://gh-proxy.com/https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.30/Hongguo-iOS-0.1.30-unsigned.ipa",
-    "ghfast": "https://ghfast.top/https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.30/Hongguo-iOS-0.1.30-unsigned.ipa"
+    "gh-proxy": "https://gh-proxy.com/https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.31/Hongguo-iOS-0.1.31-unsigned.ipa",
+    "ghfast": "https://ghfast.top/https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.31/Hongguo-iOS-0.1.31-unsigned.ipa"
   }
 }
