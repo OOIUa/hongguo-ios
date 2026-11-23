@@ -21,7 +21,7 @@ python3 scripts/test-feeds.py
 
 不传 `--skip-build` 会先构建。公开发布为独立步骤 `bash scripts/release-publish.sh v0.1.1`，通常交给 Actions 执行，以免本机与 CI 同时发布。
 
-测试版使用 `vX.Y.Z-beta.N` 标签，IPA 内保留数字版本和 build。例如发布已经验过的本地测试包时，先运行 `bash scripts/release.sh v0.1.32-beta.1 --skip-build`，再在推送对应提交和标签后运行 `bash scripts/release-publish.sh v0.1.32-beta.1`。GitHub 会以 Pre-release 公开测试包、源码、校验文件和四份测试清单。全能签测试源可从该次 Release 的 `source.json` 或两条加速源导入，只指向这个测试版本。应用内默认更新清单和现有全能签订阅继续分发最新正式版。
+测试版使用 `vX.Y.Z-beta.N` 标签，IPA 内保留数字版本和 build。例如发布已经验过的本地测试包时，先运行 `bash scripts/release.sh v0.1.32-beta.1 --skip-build`，再在推送对应提交和标签后运行 `bash scripts/release-publish.sh v0.1.32-beta.1`。GitHub 会以 Pre-release 公开测试包、源码、校验文件和四份测试清单。全能签测试源可从该次 Release 的 `source.json` 或两条加速源导入，只指向这个测试版本。应用内默认更新清单继续分发最新正式版。需要让已有全能签用户参与测试时，将已校验的测试版条目和提示同步到三条常用订阅，保留各订阅的名称、标识与刷新地址。下次正式版同步时，三条订阅会更新为正式版。
 
 若 Release 已公开而源同步失败，请不要重建并覆盖该版本的资产。可以在 Actions 手动运行 release workflow，填入已有 tag，并勾选 `recover_feeds_only`；也可以在已认证的本地仓库执行：
 

@@ -1,26 +1,26 @@
 {
   "name": "红果 iOS · 国内备用加速",
-  "message": "项目维护者发布的未签名 IPA；需要自行签名安装。加速服务由第三方提供。",
+  "message": "测试版 v0.1.32-beta.1，供手动安装验证。\n项目维护者发布的未签名 IPA；需要自行签名安装。加速服务由第三方提供。",
   "identifier": "ooiua.hongguo-ios.source-cn-backup",
   "sourceURL": "https://ghfast.top/https://raw.githubusercontent.com/OOIUa/hongguo-ios/main/distribution/source-cn-backup.json",
-  "sourceicon": "https://ghfast.top/https://raw.githubusercontent.com/OOIUa/hongguo-ios/v0.1.31/distribution/icon.png",
+  "sourceicon": "https://ghfast.top/https://raw.githubusercontent.com/OOIUa/hongguo-ios/v0.1.32-beta.1/distribution/icon.png",
   "apps": [
     {
-      "name": "红果独立版",
+      "name": "红果独立版（测试版）",
       "type": "1",
       "bundleIdentifier": "com.ooiua.hongguo.ios",
-      "version": "0.1.31",
-      "build": 32,
+      "version": "0.1.32",
+      "build": 33,
       "minimumOSVersion": "17.0",
-      "versionDate": "2026-11-22T05:19:36Z",
-      "versionDescription": "新增详情页演员表：展示演员头像、姓名与饰演角色，点按演员可查看简介。\n优化长按 2× 加速播放：画面顶部显示提示，松手自动恢复原速。\n修复账号片单里剧集名称与海报缺失、显示占位条目的问题；观看进度与时间仍取最新记录。\n未签名 IPA，需使用本人的证书签名后安装。",
+      "versionDate": "2026-11-23T12:33:21Z",
+      "versionDescription": "测试版 v0.1.32-beta.1，供手动安装验证。\n新增官网公开片源回退，播放接口返回空响应时，自动尝试官网已向访客开放的分集。\n修复取源时交替出现空响应与临时网络错误，或备用接口响应过慢，导致可用的官网片源未能起播的问题。\n未签名 IPA，需使用本人的证书签名后安装。",
       "lock": "0",
-      "downloadURL": "https://ghfast.top/https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.31/Hongguo-iOS-0.1.31-unsigned.ipa",
+      "downloadURL": "https://ghfast.top/https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.32-beta.1/Hongguo-iOS-0.1.32-unsigned.ipa",
       "isLanZouCloud": "0",
-      "iconURL": "https://ghfast.top/https://raw.githubusercontent.com/OOIUa/hongguo-ios/v0.1.31/distribution/icon.png",
+      "iconURL": "https://ghfast.top/https://raw.githubusercontent.com/OOIUa/hongguo-ios/v0.1.32-beta.1/distribution/icon.png",
       "tintColor": "E8463F",
-      "size": "2054875",
-      "sha256": "fee52aca01831b862ecae255045b146fbe6e0a6bd843e94b69e9f7970b1c1b4c"
+      "size": "2068676",
+      "sha256": "712f2fa4f695a55878d557d7e17ea9607de8d440a7b5acbd5870671904dfe254"
     }
   ]
 }
