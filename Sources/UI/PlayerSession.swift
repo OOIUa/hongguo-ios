@@ -58,13 +58,14 @@ final class PlayerSession: ObservableObject {
         saveProgress(flush: true)
         requestTask?.cancel()
         let nextEpisode = detail.episodes[target]
+        let seriesID = detail.drama.id
         let prepared = warmEpisodeID == nextEpisode.id ? warmURL : nil
         if prepared != nil { warmURL = nil; warmEpisodeID = nil }
         cancelWarm()
         releasePlayer()
         index = target; playID = UUID(); resumeAfterGesture = false
         let ticket = playID
-        let saved = startAt ?? (recordsLocalHistory ? app.library.progress(for: detail.drama.id).flatMap { $0.episodeID == nextEpisode.id ? $0.position : nil } : nil) ?? 0
+        let saved = startAt ?? (recordsLocalHistory ? app.library.progress(for: seriesID).flatMap { $0.episodeID == nextEpisode.id ? $0.position : nil } : nil) ?? 0
         position = saved; duration = 0; previewPosition = saved
         preparing = true; stage = "正在获取播放地址"; progress = 0; error = nil
         rendered = false; endMessage = nil; holding = false; videoSize = .zero; scrubbing = false; prefetchStarted = false; finished = false
@@ -77,7 +78,7 @@ final class PlayerSession: ObservableObject {
                     item = AVPlayerItem(url: prepared)
                 }
                 else {
-                    let track = try await DramaAPI.shared.track(episodeID: nextEpisode.id)
+                    let track = try await DramaAPI.shared.track(episodeID: nextEpisode.id, seriesID: seriesID)
                     try Task.checkCancellation()
                     if let url = try await MediaPreparer.shared.cachedPlayback(track: track, episodeID: nextEpisode.id) {
                         await MediaPreparer.shared.pin(url)
@@ -232,9 +233,9 @@ final class PlayerSession: ObservableObject {
               currentStream == nil || progress >= 0.999 else { return }
         prefetchStarted = true
         let next = detail.episodes[index + 1], ticket = playID
-        warmTask = Task { [weak self] in
+        warmTask = Task { [weak self, seriesID = detail.drama.id] in
             do {
-                let track = try await DramaAPI.shared.track(episodeID: next.id)
+                let track = try await DramaAPI.shared.track(episodeID: next.id, seriesID: seriesID)
                 try Task.checkCancellation()
                 let url = try await MediaPreparer.shared.prepare(track: track, episodeID: next.id) { _, _ in }
                 try Task.checkCancellation()

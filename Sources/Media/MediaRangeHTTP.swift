@@ -82,9 +82,7 @@ final class MediaRangeHTTP: NSObject, URLSessionDataDelegate, @unchecked Sendabl
 
     private init(range: Range<Int>) { self.range = range }
     static func allowed(_ url: URL) -> Bool {
-        guard url.scheme?.lowercased() == "https", url.user == nil, url.password == nil,
-              let host = url.host?.lowercased(), url.port == nil || url.port == 443 else { return false }
-        return ["qznovelvod.com", "fqnovelvod.com", "douyinvod.com"].contains { host == $0 || host.hasSuffix("." + $0) }
+        VideoTrack.allowsMediaURL(url)
     }
     /// An allowed media host may answer 302 to another CDN for load balancing. Seen so far: *.vegslb.com, *.bdcgslb.com
     /// (2026-11-06), *.idouyinvod.com and *.smtcdns.com (2026-11-08). The set changes without notice and rejecting an

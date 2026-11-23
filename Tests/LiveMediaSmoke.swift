@@ -22,7 +22,7 @@ import CoreVideo
             guard let episode = detail.episodes.first else { throw HGError.message("分集为空") }
             print("episodes=\(detail.episodes.count)")
             stage = "track"
-            let track = try await api.track(episodeID: episode.id)
+            let track = try await api.track(episodeID: episode.id, seriesID: detail.drama.id)
             print("track_encrypted=\(track.encrypted) definition=\(track.definition)")
             stage = "prepare"
             let url = try await MediaPreparer.shared.prepare(track: track, episodeID: episode.id, progress: { _, _ in })

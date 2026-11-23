@@ -13,8 +13,10 @@ actor MediaPreparer {
     private var initialized = false
     private let limit = MP4Processor.maximumBytes
 
-    private var root: URL {
-        fm.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("PreparedMedia-v1", isDirectory: true)
+    private let root: URL
+    init(root: URL? = nil) {
+        self.root = root ?? FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("PreparedMedia-v1", isDirectory: true)
     }
     private struct CacheRecord: Codable { let bytes: Int; let sha256: String }
 
@@ -23,7 +25,7 @@ actor MediaPreparer {
         let key = HGCrypto.sha256(Data((episodeID + ":" + track.definition).utf8)).map { String(format: "%02x", $0) }.joined()
         let movie = root.appendingPathComponent(key + ".mp4"), record = root.appendingPathComponent(key + ".json")
         guard fm.fileExists(atPath: record.path) else { return nil }
-        do { return try cachedFile(movie, record: record) }
+        do { return try cachedFile(movie, record: record, expectedDuration: track.expectedDuration) }
         catch { try Task.checkCancellation(); return nil }
     }
 
@@ -44,7 +46,7 @@ actor MediaPreparer {
         let key = HGCrypto.sha256(Data((episodeID + ":" + track.definition).utf8)).map { String(format: "%02x", $0) }.joined()
         let finalURL = root.appendingPathComponent(key + ".mp4")
         let recordURL = root.appendingPathComponent(key + ".json")
-        if let cached = try? cachedFile(finalURL, record: recordURL) {
+        if let cached = try? cachedFile(finalURL, record: recordURL, expectedDuration: track.expectedDuration) {
             progress("已读取缓存", 1); return cached
         }
         // Cancellation during hashing is not evidence of corruption: preserve the valid cache.
@@ -66,7 +68,9 @@ actor MediaPreparer {
             let work = Task.detached(priority: .userInitiated) {
                 if track.encrypted {
                     try MP4Processor.decrypt(url: staging, spade: track.spadeA, progress: progress)
-                } else { try MP4Processor.validate(url: staging, requirePlain: true) }
+                } else {
+                    try MP4Processor.validate(url: staging, requirePlain: true, expectedDuration: track.expectedDuration)
+                }
             }
             try await withTaskCancellationHandler(operation: { try await work.value }, onCancel: { work.cancel() })
             try Task.checkCancellation()
@@ -80,7 +84,7 @@ actor MediaPreparer {
             // Clear-cache invalidates completed work that was already in flight.
             guard active.contains(identifier) else { throw CancellationError() }
             // Another request for the same episode may have completed while we downloaded.
-            if let cached = try? cachedFile(finalURL, record: recordURL) {
+            if let cached = try? cachedFile(finalURL, record: recordURL, expectedDuration: track.expectedDuration) {
                 progress("已读取缓存", 1); return cached
             }
             try Task.checkCancellation()
@@ -132,13 +136,13 @@ actor MediaPreparer {
         }
     }
 
-    private func cachedFile(_ url: URL, record: URL) throws -> URL {
+    private func cachedFile(_ url: URL, record: URL, expectedDuration: WebEpisodeDuration?) throws -> URL {
         let metadata = try JSONDecoder().decode(CacheRecord.self, from: Data(contentsOf: record))
         guard metadata.bytes > 0, metadata.bytes <= limit, try fileSize(url) == metadata.bytes,
               try Self.hashFile(url) == metadata.sha256 else {
             try? fm.removeItem(at: url); try? fm.removeItem(at: record); throw MediaError.invalidMedia
         }
-        try MP4Processor.validate(url: url)
+        try MP4Processor.validate(url: url, expectedDuration: expectedDuration)
         try? fm.setAttributes([.modificationDate: Date()], ofItemAtPath: url.path)
         return url
     }

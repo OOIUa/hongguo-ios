@@ -96,12 +96,22 @@ private func check(_ condition: Bool, _ label: String) throws {
         let actual8 = try await source8.read(at: offset8, count: 40_001)
         try check(actual8 == fixture.clear8.subdata(in: offset8..<(offset8 + 40_001)), "8-byte IV range mismatch")
         await source8.close()
-        let plainTrack = VideoTrack(url: track.url, spadeA: "", encrypted: false, definition: "plain")
+        var plainTrack = VideoTrack(url: track.url, spadeA: "", encrypted: false, definition: "plain", expectedDuration: .declared(9))
         let plainServer = FixtureServer(fixture.plain)
         let plain = try await ProgressiveSource.open(track: plainTrack, episodeID: "plain", cache: cache, fetch: { try await plainServer.fetch($0) })
         let plainBytes = try await plain.read(at: 500_003, count: 32_001)
         try check(plainBytes == fixture.plain.subdata(in: 500_003..<532_004), "Plain MP4 range mismatch")
         await plain.close()
+        try await preparedDurationChecks(fixture: fixture.plain, track: plainTrack, root: base.appendingPathComponent("prepared"))
+        for duration in [WebEpisodeDuration.declared(125), .unlisted] {
+            plainTrack.expectedDuration = duration
+            do {
+                let preview = try await ProgressiveSource.open(track: plainTrack, episodeID: "plain", cache: cache, fetch: { try await plainServer.fetch($0) })
+                await preview.close()
+                try check(false, "Opened a cached preview as the full episode")
+            } catch MediaError.durationMismatch {}
+        }
+        plainTrack.expectedDuration = nil
         // A row without encryption info is opened as plain; a CENC index behind it must still be refused.
         let protectedServer = FixtureServer(fixture.encrypted)
         do {
@@ -143,6 +153,27 @@ private func check(_ condition: Bool, _ label: String) throws {
         let filesAfter = (FileManager.default.enumerator(at: base.appendingPathComponent("cache"), includingPropertiesForKeys: nil)?.allObjects as? [URL]) ?? []
         try check(!filesAfter.contains { $0.pathExtension == "chunk" }, "Closed cache could not be cleared")
         print("PASS 8/16-byte IVs, plain MP4, cache cleanup; no external network used")
+    }
+
+    private static func preparedDurationChecks(fixture: Data, track: VideoTrack, root: URL) async throws {
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let episodeID = "duration-check"
+        let key = HGCrypto.sha256(Data((episodeID + ":" + track.definition).utf8)).map { String(format: "%02x", $0) }.joined()
+        let movie = root.appendingPathComponent(key + ".mp4")
+        try fixture.write(to: movie)
+        let digest = HGCrypto.sha256(fixture).map { String(format: "%02x", $0) }.joined()
+        let record = try JSONSerialization.data(withJSONObject: ["bytes": fixture.count, "sha256": digest])
+        try record.write(to: root.appendingPathComponent(key + ".json"))
+
+        let preparer = MediaPreparer(root: root)
+        let matching = try await preparer.cachedPlayback(track: track, episodeID: episodeID)
+        try check(matching == movie, "Existing complete-file cache with matching duration was not reused")
+        var previewTrack = track
+        for duration in [WebEpisodeDuration.declared(125), .unlisted] {
+            previewTrack.expectedDuration = duration
+            let mismatched = try await preparer.cachedPlayback(track: previewTrack, episodeID: episodeID)
+            try check(mismatched == nil, "Complete-file cache returned a preview as the full episode")
+        }
     }
 
     @MainActor private static func playerChecks(fixture: ProgressiveFixture, track: VideoTrack, cache: ProgressiveCache) async throws {

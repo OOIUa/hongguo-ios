@@ -18,10 +18,50 @@ func nodes(_ d: Data, _ start: Int, _ end: Int) -> [Node] {
 func child(_ d: Data, _ n: Node, _ type: String, skip: Int = 0) -> Node { nodes(d,n.payload + skip,n.end).first { $0.type == type }! }
 
 @main struct Main {
+    private static func durationChecks(in directory: URL) throws {
+        let url = directory.appendingPathComponent("duration.mp4")
+        func writeMovieHeader(_ payload: Data) throws {
+            let header = box("mvhd", payload)
+            let movie = box("moov", header + box("trak", Data()))
+            try (box("ftyp", Data("isom".utf8)) + movie + box("mdat", Data([0]))).write(to: url)
+        }
+
+        // Version 0 has 32-bit timestamps, timescale and duration.
+        try writeMovieHeader(Data(repeating: 0, count: 12) + be32(1_000) + be32(125_140))
+        try MP4Processor.validate(url: url, expectedDuration: .declared(125))
+        try MP4Processor.validate(url: url, expectedDuration: .unlisted)
+        do {
+            try MP4Processor.validate(url: url, expectedDuration: .declared(10))
+            fatalError("A different episode duration was accepted")
+        } catch MediaError.durationMismatch {}
+        for previewTicks in [10_000, 10_140, 11_000] {
+            try writeMovieHeader(Data(repeating: 0, count: 12) + be32(1_000) + be32(previewTicks))
+            try MP4Processor.validate(url: url)
+            do {
+                try MP4Processor.validate(url: url, expectedDuration: .unlisted)
+                fatalError("A ten-second preview was accepted when the episode page omitted its length")
+            } catch MediaError.durationMismatch {}
+        }
+
+        // Version 1 uses 64-bit timestamps and duration. Exercise the high word.
+        let ticks = 12_514_000_000
+        let timestamps = Data([1]) + Data(repeating: 0, count: 19)
+        try writeMovieHeader(timestamps + be32(100_000_000) + be32(ticks >> 32) + be32(ticks))
+        try MP4Processor.validate(url: url, expectedDuration: .declared(125))
+        for invalid in [Data([1]), timestamps + be32(0) + be32(0) + be32(10)] {
+            try writeMovieHeader(invalid)
+            do {
+                try MP4Processor.validate(url: url, expectedDuration: .declared(125))
+                fatalError("An invalid movie duration was accepted")
+            } catch MediaError.invalidMedia {}
+        }
+    }
+
     static func main() async throws {
         let base = FileManager.default.temporaryDirectory.appendingPathComponent("hongguo-media-test-" + UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: base) }
+        try durationChecks(in: base)
         let origin = base.appendingPathComponent("original.mp4")
         try? FileManager.default.removeItem(at:origin)
         let writer = try AVAssetWriter(url:origin,fileType:.mp4)

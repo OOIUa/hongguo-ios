@@ -44,7 +44,9 @@ def published_release(repo, tag):
 
 def main():
     operation, repo, tag = sys.argv[1:]
-    version(tag)
+    # Only asset creation accepts beta tags. Stable feed guards always require a numeric release.
+    numeric_tag = re.sub(r'-beta\.[1-9][0-9]*\Z', '', tag) if operation == 'require-missing' else tag
+    version(numeric_tag)
     if operation == 'require-missing':
         existing = api_json('repos/' + repo + '/releases/tags/' + quote(tag, safe=''), missing_ok=True)
         if existing is not None:

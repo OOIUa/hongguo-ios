@@ -40,7 +40,7 @@ final class FeedPreview: ObservableObject {
             do {
                 let detail = try await DramaAPI.shared.detail(drama: drama)
                 guard let first = detail.episodes.first else { throw HGError.message("这部剧暂时没有可播放剧集") }
-                let track = try await DramaAPI.shared.track(episodeID: first.id)
+                let track = try await DramaAPI.shared.track(episodeID: first.id, seriesID: detail.drama.id)
                 try Task.checkCancellation()
                 let item: AVPlayerItem
                 if let url = try await MediaPreparer.shared.cachedPlayback(track: track, episodeID: first.id) {
@@ -61,8 +61,7 @@ final class FeedPreview: ObservableObject {
             } catch is CancellationError {
             } catch {
                 guard let self, self.ticket == ticket else { return }
-                // The playback API intermittently rejects a fresh anonymous identity; try this page once more.
-                if retry {
+                if retry, !(error is DramaAPI.PlaybackRefusal), !(error is PublicEpisodeSource.Failure) {
                     try? await Task.sleep(nanoseconds: 2_000_000_000)
                     guard self.ticket == ticket, !Task.isCancelled else { return }
                     self.dramaID = nil; self.play(drama, retry: false); return

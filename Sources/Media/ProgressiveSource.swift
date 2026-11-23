@@ -70,7 +70,7 @@ actor ProgressiveSource {
         }
         guard let moovOffset else { throw MediaError.invalidMedia }
         let descriptor = try MP4Processor.streamPlan(length: length, moovOffset: moovOffset, moov: moov,
-            media: media, psshOffsets: pssh, encrypted: track.encrypted, spade: track.spadeA)
+            media: media, psshOffsets: pssh, encrypted: track.encrypted, spade: track.spadeA, expectedDuration: track.expectedDuration)
         let identity = Data((episodeID + ":" + track.definition + ":" + String(length) + ":" + track.spadeA).utf8) + moov + Data(SHA256.hash(data: first.data))
         let key = SHA256.hash(data: identity + (first.representationDigests["sha-256"] ?? first.representationDigests["sha-512"] ?? Data())).map { String(format: "%02x", $0) }.joined()
         await cache.acquire(key)

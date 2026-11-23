@@ -8,7 +8,14 @@ if [[ -z "$release_tag" ]]; then
   echo "Usage: scripts/release-publish.sh vX.Y.Z" >&2
   exit 2
 fi
-python3 scripts/generate-feeds.py --tag "$release_tag" --check
+python3 scripts/generate-feeds.py --tag "$release_tag" --config-only >/dev/null
+release_feeds=distribution
+release_flags=(--verify-tag)
+if [[ "$release_tag" == *-beta.* ]]; then
+  release_feeds="build/beta-feeds/$release_tag"
+  release_flags+=(--prerelease --latest=false)
+fi
+python3 scripts/generate-feeds.py --tag "$release_tag" --output "$release_feeds" --check
 release_repo="$(python3 -c 'import json;print(json.load(open("Configuration/Release.json"))["repository"])')"
 release_version="$(python3 -c 'import json;print(json.load(open("Configuration/Release.json"))["version"])')"
 release_ipa="dist/Hongguo-iOS-${release_version}-unsigned.ipa"
@@ -39,11 +46,34 @@ else:
 Path('build').mkdir(exist_ok=True)
 Path('build/release-notes.md').write_text(notes)
 PY
-# Check before creating the draft, and again immediately before making it public.
-python3 scripts/release-common.py latest-flag "$release_repo" "$release_tag" >/dev/null
-gh release create "$release_tag" --repo "$release_repo" --verify-tag --draft \
+if [[ "$release_feeds" == distribution ]]; then
+  python3 scripts/release-common.py latest-flag "$release_repo" "$release_tag" >/dev/null
+fi
+release_assets=("$release_ipa" "${release_ipa}.sha256" "$release_source" "${release_source}.sha256"
+  "$release_feeds/update.json" "$release_feeds/source.json" "$release_feeds/source-cn.json" "$release_feeds/source-cn-backup.json")
+release_uploads=("${release_assets[@]}")
+if [[ "$release_feeds" != distribution ]]; then
+  release_uploads[0]="$release_ipa#红果 iOS 测试版（无签名 iPhone IPA）"
+fi
+gh release create "$release_tag" --repo "$release_repo" --draft "${release_flags[@]}" \
   --title "${release_tag}" --notes-file build/release-notes.md \
-  "$release_ipa" "${release_ipa}.sha256" "$release_source" "${release_source}.sha256" \
-  distribution/update.json distribution/source.json distribution/source-cn.json distribution/source-cn-backup.json
-release_latest="$(python3 scripts/release-common.py latest-flag "$release_repo" "$release_tag")"
-gh release edit "$release_tag" --repo "$release_repo" --draft=false "--latest=$release_latest"
+  "${release_uploads[@]}"
+if [[ "$release_feeds" == distribution ]]; then
+  release_latest="$(python3 scripts/release-common.py latest-flag "$release_repo" "$release_tag")"
+  release_flags=("--latest=$release_latest")
+else
+  gh release view "$release_tag" --repo "$release_repo" --json tagName,isDraft,isPrerelease,assets > build/beta-draft.json
+  python3 - "$release_tag" "${release_assets[@]}" <<'PY'
+import hashlib, json, sys
+from pathlib import Path
+draft = json.loads(Path("build/beta-draft.json").read_text())
+if draft["tagName"] != sys.argv[1] or not (draft["isDraft"] and draft["isPrerelease"]):
+    sys.exit("Expected a prerelease draft for the selected tag.")
+remote = {a["name"]: (a["size"], a["digest"]) for a in draft["assets"] if a["state"].lower() == "uploaded"}
+local = {p.name: (p.stat().st_size, "sha256:" + hashlib.sha256(p.read_bytes()).hexdigest())
+         for p in map(Path, sys.argv[2:])}
+if remote != local:
+    sys.exit("The uploaded draft assets do not match the prepared prerelease files.")
+PY
+fi
+gh release edit "$release_tag" --repo "$release_repo" --draft=false "${release_flags[@]}"

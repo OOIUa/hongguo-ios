@@ -7,6 +7,8 @@ import importlib.util
 import json
 import plistlib
 import struct
+import subprocess
+import sys
 import tempfile
 import unittest
 from unittest import mock
@@ -67,6 +69,7 @@ class FeedTests(unittest.TestCase):
         self.assertEqual(update["sha256"], feeds.file_sha256(self.ipa))
         self.assertEqual(update["size"], self.ipa.stat().st_size)
         self.assertEqual(update["build"], 2)
+        self.assertNotIn("channel", update)
         self.assertTrue(report["unsigned"])
         direct = "https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.1/Hongguo-iOS-0.1.1-unsigned.ipa"
         for filename, prefix in [("source.json", ""), ("source-cn.json", "https://gh-proxy.com/"), ("source-cn-backup.json", "https://ghfast.top/")]:
@@ -80,6 +83,69 @@ class FeedTests(unittest.TestCase):
             self.assertEqual(int(app["size"]), update["size"])
             self.assertEqual(app["versionDate"], update["publishedAt"])
         self.generate(check=True)
+
+    def test_beta_release_attachments_and_mirrors(self):
+        self.package()
+        self.generate()
+        stable_bytes = {name: (self.output / name).read_bytes() for name in feeds.GENERATED}
+        tag = "v0.1.1-beta.2"
+        staging = self.root / "beta-attachments"
+        assets = f"https://github.com/OOIUa/hongguo-ios/releases/download/{tag}/"
+        icon = f"https://raw.githubusercontent.com/OOIUa/hongguo-ios/{tag}/distribution/icon.png"
+        with mock.patch.object(feeds, "ROOT", self.root):
+            options = {"tag": tag, "use_codesign": False}
+            feeds.generate(self.config_path, self.ipa, staging, **options)
+            feeds.generate(self.config_path, self.ipa, staging, check=True, **options)
+            self.assertEqual(set(feeds.GENERATED), {path.name for path in staging.iterdir()})
+            update = json.loads((staging / "update.json").read_text())
+            self.assertEqual(update["channel"], "beta")
+            self.assertEqual(update["version"], self.config["version"])
+            self.assertEqual(update["build"], self.config["build"])
+            self.assertEqual(update["sha256"], feeds.file_sha256(self.ipa))
+            self.assertEqual(update["size"], self.ipa.stat().st_size)
+            self.assertEqual(update["downloadURL"], assets + self.ipa.name)
+            self.assertEqual(update["mirrors"], {key: prefix + update["downloadURL"] for key, prefix in feeds.MIRRORS.items()})
+            for name, prefix in [("source.json", ""), ("source-cn.json", feeds.MIRRORS["gh-proxy"]),
+                                 ("source-cn-backup.json", feeds.MIRRORS["ghfast"])]:
+                source = json.loads((staging / name).read_text())
+                app, = source["apps"]
+                self.assertIn("测试版", source["name"])
+                self.assertIn(tag, source["message"])
+                self.assertIn("beta", source["identifier"])
+                self.assertNotEqual(source["identifier"], json.loads(stable_bytes[name])["identifier"])
+                self.assertIn("测试版", app["name"])
+                self.assertIn(tag, app["versionDescription"])
+                self.assertEqual(source["sourceURL"], prefix + assets + name)
+                self.assertEqual(app["downloadURL"], prefix + update["downloadURL"])
+                self.assertEqual(source["sourceicon"], prefix + icon)
+                self.assertEqual(app["iconURL"], prefix + icon)
+                self.assertEqual(app["bundleIdentifier"], feeds.BUNDLE_ID)
+                self.assertEqual(app["size"], str(update["size"]))
+                for key in ("version", "build", "minimumOSVersion", "sha256"):
+                    self.assertEqual(app[key], update[key])
+            (staging / "source-cn.json").write_bytes(stable_bytes["source-cn.json"])
+            with self.assertRaises(feeds.ValidationError):
+                feeds.generate(self.config_path, self.ipa, staging, check=True, **options)
+            self.assertEqual(stable_bytes, {name: (self.output / name).read_bytes() for name in feeds.GENERATED})
+
+    def test_beta_requires_exact_tag_and_separate_staging(self):
+        for tag in ("v0.1.1-beta.0", "v0.1.1-beta.01", "v0.1.1-beta", "v0.1.2-beta.1", "v0.1.1-beta.1\n", "v0.1.1-rc.1"):
+            with self.subTest(tag=tag), self.assertRaises(feeds.ValidationError):
+                feeds.read_config(self.config_path, tag)
+        tag = "v0.1.1-beta.1"
+        alias = self.root / "distribution-alias"
+        alias.symlink_to(self.output, target_is_directory=True)
+        with mock.patch.object(feeds, "ROOT", self.root):
+            for output in (self.output, alias, alias / "extra"):
+                for check in (False, True):
+                    with self.subTest(output=output, check=check), self.assertRaisesRegex(feeds.ValidationError, "separate --output"):
+                        feeds.generate(self.config_path, self.ipa, output, tag=tag, check=check, use_codesign=False)
+        for extra in ([], ["--check"]):
+            result = subprocess.run([sys.executable, feeds.__file__, "--config", str(self.config_path), "--tag", tag, *extra],
+                                    capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("explicit --output", result.stderr)
+        self.assertEqual({path.name for path in self.output.iterdir()}, {"icon.png"})
 
     def test_metadata_drift_is_rejected(self):
         for changes in [{"CFBundleShortVersionString": "0.1.0"}, {"CFBundleVersion": "1"}, {"MinimumOSVersion": "16.0"},

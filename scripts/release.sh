@@ -14,8 +14,12 @@ python3 scripts/test-feeds.py
 if [[ "$release_mode" != "--skip-build" ]]; then
   bash scripts/build-unsigned.sh
 fi
-python3 scripts/generate-feeds.py --tag "$release_tag"
-python3 scripts/generate-feeds.py --tag "$release_tag" --check
+release_feeds=distribution
+if [[ "$release_tag" == *-beta.* ]]; then
+  release_feeds="build/beta-feeds/$release_tag"
+fi
+python3 scripts/generate-feeds.py --tag "$release_tag" --output "$release_feeds"
+python3 scripts/generate-feeds.py --tag "$release_tag" --output "$release_feeds" --check
 python3 scripts/package-source.py
 python3 - <<'PY'
 import hashlib, json
@@ -27,5 +31,6 @@ ipa.with_name(ipa.name + '.sha256').write_text(digest + '  ' + ipa.name + '\n')
 notes = '\n'.join('- ' + item for item in config['releaseNotes'])
 Path('build').mkdir(exist_ok=True)
 Path('build/release-notes.md').write_text(f"红果 iOS {config['version']}（build {config['build']}）\n\n{notes}\n\n未签名 IPA，需要自行签名后安装。最低 iOS {config['minimumOSVersion']}。\n")
-print(f"Prepared {ipa.name}; feeds are in distribution/. No release or commit was created.")
+print(f"Prepared {ipa.name}.")
 PY
+echo "Verified feeds: $release_feeds"

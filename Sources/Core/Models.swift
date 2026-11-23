@@ -38,12 +38,27 @@ struct DramaPage: Sendable {
     let nextOffset: Int
 }
 
+enum WebEpisodeDuration: Equatable, Sendable {
+    case declared(Double)
+    case unlisted
+}
+
 struct VideoTrack: Sendable {
     let url: URL
     let spadeA: String
     let encrypted: Bool
     let definition: String
     var backupURLs: [URL] = []
+    /// Only website tracks need to distinguish a full episode from a preview.
+    var expectedDuration: WebEpisodeDuration? = nil
+}
+
+extension VideoTrack {
+    static func allowsMediaURL(_ url: URL) -> Bool {
+        guard url.scheme?.lowercased() == "https", url.user == nil, url.password == nil,
+              let host = url.host?.lowercased(), url.port == nil || url.port == 443 else { return false }
+        return ["qznovelvod.com", "fqnovelvod.com", "douyinvod.com"].contains { host == $0 || host.hasSuffix("." + $0) }
+    }
 }
 
 struct FilterOption: Identifiable, Hashable, Sendable {

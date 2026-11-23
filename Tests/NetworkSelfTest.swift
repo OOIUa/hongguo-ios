@@ -32,6 +32,7 @@ import JavaScriptCore
             if timestamp == (fixtures.first!["timestamp"] as! NSNumber).int64Value { try await checkMobilePlayback(context: context, root: root) }
         }
         checkDanmakuLogic()
+        try checkPublicEpisodes()
         let precise = try ProtocolJSON.object(Data(#"{"id":18446744073709551615,"larger":123456789012345678901234567890,"text":"12345678901234567890","fraction":1234567890123456.5,"exponent":1234567890123456e2}"#.utf8))
         precondition(precise["id"] as? String == "18446744073709551615")
         precondition(precise["larger"] as? String == "123456789012345678901234567890")

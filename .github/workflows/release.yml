@@ -24,7 +24,30 @@ concurrency:
   queue: max
 
 jobs:
+  verify-beta:
+    if: ${{ contains(inputs.tag || github.ref_name, '-beta.') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ inputs.tag || github.ref_name }}
+          fetch-depth: 0
+      - name: Verify beta tag, repository, main ancestry, and feed tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/generate-feeds.py --tag "$RELEASE_TAG" --config-only
+          jq -e --arg repo "$GITHUB_REPOSITORY" '.repository == $repo' Configuration/Release.json
+          git fetch origin main
+          git merge-base --is-ancestor "refs/tags/$RELEASE_TAG^{commit}" origin/main
+          python3 scripts/test-feeds.py
+
   release:
+    if: ${{ !contains(inputs.tag || github.ref_name, '-beta.') }}
     # macos-latest still ships Xcode 26; iPhone Duo runs only apps built with the iOS 27.1+ SDK at full size.
     runs-on: xcode-27
     timeout-minutes: 40

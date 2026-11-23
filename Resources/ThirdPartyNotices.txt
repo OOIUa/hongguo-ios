@@ -94,3 +94,11 @@ Playback v5 model endpoint (2026-11-16)
   catalogue, search and account signing stays unchanged. SDK-derived synthetic digest
   vectors and carrier vectors verify the pure-code ports; the referenced research VM
   was not copied or included.
+
+Public guest episode playback (2026-11-23)
+
+- The web-player fallback in Sources/Networking/PublicEpisodeSource.swift follows
+  jackotom/hongguo-drama v8.0, src/native/hongguo.js, GPL-3.0-only.
+  https://github.com/jackotom/hongguo-drama/blob/8d14d07b3aaf99ecbe6b3ecb8ba2d0308261845d/src/native/hongguo.js
+- The iOS implementation checks the public episode page's guest availability and
+  declared duration before accepting complete media through the native player.

@@ -58,6 +58,13 @@ enum WebsiteCatalog {
     /// Since 2026-11-11 the site renders the loader result inline as `_ROUTER_DATA = {...}`
     /// (loaderData["rank_<route>/page"].content); the streamed data-fn-args payload is gone (Android issue #8).
     static func inlineRankContent(_ html: String, board: RankBoard) -> [String: Any]? {
+        inlineLoader(html) { loaders in
+            ProtocolJSON.dictionary(loaders[board.loader])["content"] as? [String: Any]
+        }
+    }
+
+    /// Reads serialized page data from the guest site without executing page scripts.
+    static func inlineLoader<T>(_ html: String, select: ([String: Any]) -> T?) -> T? {
         let marker = Array("_ROUTER_DATA = ".utf8), bytes = Array(html.utf8)
         var at = 0
         while let start = firstIndex(of: marker, in: bytes, from: at) {
@@ -65,8 +72,7 @@ enum WebsiteCatalog {
             at = open
             guard open < bytes.count, bytes[open] == UInt8(ascii: "{"), let close = objectEnd(bytes, from: open),
                   let root = try? ProtocolJSON.object(Data(bytes[open...close])) else { continue }
-            let loader = ProtocolJSON.dictionary(ProtocolJSON.dictionary(root["loaderData"])[board.loader])
-            if let content = loader["content"] as? [String: Any] { return content }
+            if let loaders = root["loaderData"] as? [String: Any], let value = select(loaders) { return value }
         }
         return nil
     }
