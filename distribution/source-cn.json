@@ -3,24 +3,24 @@
   "message": "项目维护者发布的未签名 IPA；需要自行签名安装。加速服务由第三方提供。",
   "identifier": "ooiua.hongguo-ios.source-cn",
   "sourceURL": "https://gh-proxy.com/https://raw.githubusercontent.com/OOIUa/hongguo-ios/main/distribution/source-cn.json",
-  "sourceicon": "https://gh-proxy.com/https://raw.githubusercontent.com/OOIUa/hongguo-ios/v0.1.32/distribution/icon.png",
+  "sourceicon": "https://gh-proxy.com/https://raw.githubusercontent.com/OOIUa/hongguo-ios/v0.1.33/distribution/icon.png",
   "apps": [
     {
       "name": "红果独立版",
       "type": "1",
       "bundleIdentifier": "com.ooiua.hongguo.ios",
-      "version": "0.1.32",
-      "build": 33,
+      "version": "0.1.33",
+      "build": 34,
       "minimumOSVersion": "17.0",
-      "versionDate": "2026-11-23T13:41:53Z",
-      "versionDescription": "新增官网公开片源回退，播放接口返回空响应时，自动尝试官网已向访客开放的分集。\n修复取源时交替出现空响应与临时网络错误，或备用接口响应过慢，导致可用的官网片源未能起播的问题。\n未签名 IPA，需使用本人的证书签名后安装。",
+      "versionDate": "2026-11-24T13:26:01Z",
+      "versionDescription": "修复匿名设备未激活且播放请求缺少完整设备信息，导致取源返回空响应、无法起播的问题。\n优化播放请求签名，对齐官方客户端当前的设备信息格式。\n未签名 IPA，需使用本人的证书签名后安装。",
       "lock": "0",
-      "downloadURL": "https://gh-proxy.com/https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.32/Hongguo-iOS-0.1.32-unsigned.ipa",
+      "downloadURL": "https://gh-proxy.com/https://github.com/OOIUa/hongguo-ios/releases/download/v0.1.33/Hongguo-iOS-0.1.33-unsigned.ipa",
       "isLanZouCloud": "0",
-      "iconURL": "https://gh-proxy.com/https://raw.githubusercontent.com/OOIUa/hongguo-ios/v0.1.32/distribution/icon.png",
+      "iconURL": "https://gh-proxy.com/https://raw.githubusercontent.com/OOIUa/hongguo-ios/v0.1.33/distribution/icon.png",
       "tintColor": "E8463F",
-      "size": "2068676",
-      "sha256": "712f2fa4f695a55878d557d7e17ea9607de8d440a7b5acbd5870671904dfe254"
+      "size": "2107309",
+      "sha256": "2e97d3e3765b99b7c8e34b732c7624306965b9eb6f28d3463dd80c85626d6a4f"
     }
   ]
 }
