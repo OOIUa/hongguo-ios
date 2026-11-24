@@ -8,6 +8,8 @@ struct RegisteredIdentity: Sendable, Equatable {
     let installID: String
     let cdid: String
     let appDeviceCookie: String
+    /// 注册响应下发的 `klink_egdi`（不透明设备标识）；官方播放 query 会带。可能为空。
+    var egdi: String = ""
     var device: [String: String] {
         var profile = PlaybackRegistration.deviceProfile
         profile["device_id"] = deviceID; profile["iid"] = installID; profile["cdid"] = cdid
@@ -26,6 +28,12 @@ enum PlaybackRegistration {
         "player_so_load":"1", "is_android_pad_screen":"0"
     ]
     static let userAgent = "com.phoenix.read/71532 (Linux; U; Android 9; SM-N9860; Build/PQ3A.190705.10241111;tt-ok/3.12.13.20)"
+    /// 匿名设备激活（`app_alert_check`）：官方客户端注册后必走一次。未激活的匿名设备在播放接口上会被当作
+    /// 低质量设备，返回 HTTP 200 + 0 字节。同步自 hongguo-android c0821c6（2026-11-24）。
+    static let activateURL = "https://log5-applog-lf.fqnovel.com/service/2/app_alert_check/"
+    /// 激活是尽力而为的旁路请求，超时要比注册短，避免拖慢起播。
+    static let activateTimeout: TimeInterval = 3
+
     static func register(session: URLSession) async throws -> RegisteredIdentity {
         try Task.checkCancellation()
         let now = Int64(Date().timeIntervalSince1970 * 1000), cdid = UUID().uuidString.lowercased()
@@ -67,7 +75,35 @@ enum PlaybackRegistration {
             return allowed.contains($0.name) && $0.path == "/" && ($0.expiresDate == nil || $0.expiresDate! > Date()) && (target == domain || target.hasSuffix("." + domain))
         }
         let cookies = cookieList.map { "\($0.name)=\($0.value)" }.joined(separator: "; ")
-        return RegisteredIdentity(deviceID: deviceID, installID: installID, cdid: cdid, appDeviceCookie: cookies)
+        let identity = RegisteredIdentity(deviceID: deviceID, installID: installID, cdid: cdid, appDeviceCookie: cookies,
+                                          egdi: responseEgdi(object))
+        await activate(identity, session: session)
+        return identity
+    }
+
+    /// 注册响应里的 `klink_egdi`：不透明字符串，可能直接给，也可能包在 `data` 里。
+    static func responseEgdi(_ object: [String: Any]) -> String {
+        let candidates = [object["klink_egdi"], ProtocolJSON.dictionary(object["data"])["klink_egdi"]]
+        return candidates.compactMap { $0 as? String }.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first { !$0.isEmpty } ?? ""
+    }
+
+    /// 注册后立刻做一次 `app_alert_check` 激活。失败不阻断取流：只记一行诊断，签名照常进行。
+    static func activate(_ identity: RegisteredIdentity, session: URLSession) async {
+        guard !identity.deviceID.isEmpty, !identity.installID.isEmpty else { return }
+        let now = Int64(Date().timeIntervalSince1970 * 1000)
+        let url = URL(string: "\(activateURL)?aid=8662&app_name=novelread&channel=update_64&device_id=\(identity.deviceID)"
+            + "&iid=\(identity.installID)&device_platform=android&os=android&version_code=73932&version_name=7.3.9.32&_rticket=\(now)")!
+        var request = URLRequest(url: url, timeoutInterval: activateTimeout)
+        request.httpMethod = "GET"; request.httpShouldHandleCookies = false
+        request.setValue("com.phoenix.read/72232 (Linux; U; Android 16; zh_CN; 25053RT47C; Build/BP2A.250605.031.A3)", forHTTPHeaderField: "User-Agent")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        do {
+            let (_, response) = try await session.data(for: request)
+            print("app_alert_check -> \((response as? HTTPURLResponse)?.statusCode ?? 0)")
+        } catch {
+            print("app_alert_check -> failed \((error as? URLError)?.code ?? .unknown)")
+        }
     }
 
     private static func payload(now: Int64, cdid: String) -> [String: Any] {

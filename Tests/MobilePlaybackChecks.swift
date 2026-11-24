@@ -38,6 +38,27 @@ func checkMobilePlayback(context: JSContext, root: URL) async throws {
     precondition(tabSigned.headers["x-khronos"] == "1800000000" && tabSigned.headers["x-medusa"] != nil && tabSigned.headers["x-helios"] != nil)
     precondition(tabSigned.headers["x-ss-stub"] == nil, "Bodyless GET must not carry x-ss-stub")
     precondition(tabSigned.headers["Cookie"] == nil && tabSigned.headers["x-argus"] == nil && tabSigned.headers["x-ladon"] == nil)
+    // 2026-11-24 (hongguo-android c0821c6): the official 28-item device context must be in the signed query.
+    for name in ["resolution", "dpi", "os_api", "rom_version", "host_abi", "dragon_device_type", "compliance_status",
+                 "player_so_load", "is_android_pad_screen", "manifest_version_code", "device_brand", "os", "ssmix", "ac"] {
+        precondition(tabValues.contains { $0.name == name }, "Missing device context field \(name)")
+    }
+    precondition(tabValues.first { $0.name == "resolution" }?.value == "1920*1080" && tabValues.first { $0.name == "device_brand" }?.value == "HONOR")
+    precondition(tabValues.first { $0.name == "klink_egdi" } == nil, "No klink_egdi must be written when registration did not send one")
+    let activated = RegisteredIdentity(deviceID: identity.deviceID, installID: identity.installID, cdid: identity.cdid,
+                                       appDeviceCookie: identity.appDeviceCookie, egdi: "opaque-token")
+    let activatedQuery = try DramaAPI.videoTabV5Query(activated, episodeID: "1234")
+    precondition(activatedQuery.first { $0[0] == "klink_egdi" }?[1] == "opaque-token", "klink_egdi must ride the signed query when present")
+    // Compare like with like: tabValues is read back from the signed URL and carries the signer's _rticket.
+    let plainQuery = try DramaAPI.videoTabV5Query(identity, episodeID: "1234")
+    precondition(plainQuery.count == 38 && activatedQuery.count == 39, "29 device fields + 9 tab fields (+ klink_egdi)")
+    precondition(Set(activatedQuery.map { $0[0] }) == Set(plainQuery.map { $0[0] }).union(["klink_egdi"]))
+    // The medusa envelope's device profile carries device_brand so the signer can fill the 38-field deviceInfo.
+    precondition(device["device_brand"] == "HONOR" && device["channel"] == "vivo_8662_64")
+    precondition(PlaybackRegistration.responseEgdi(["klink_egdi": " abc "]) == "abc")
+    precondition(PlaybackRegistration.responseEgdi(["data": ["klink_egdi": "nested"]]) == "nested")
+    precondition(PlaybackRegistration.responseEgdi(["klink_egdi": "", "data": ["klink_egdi": "later"]]) == "later")
+    precondition(PlaybackRegistration.responseEgdi(["device_id": 1]).isEmpty && PlaybackRegistration.responseEgdi(["klink_egdi": 42]).isEmpty)
     let model: [String: Any] = ["video_list":[["main_url":"https://example.test/video", "codec_type":"h264"]]]
     for entries: [String: Any] in [["1234":["video_model":model]], ["1004":["1234":["video_model":model]]]] {
         let bytes = try ProtocolJSON.data(["code":0,"data":entries])
@@ -49,7 +70,7 @@ func checkMobilePlayback(context: JSContext, root: URL) async throws {
     catch is DramaAPI.PlaybackRefusal { }
     do { _ = try DramaAPI.mobileVideoModel(Data(repeating: 0, count: 2 * 1024 * 1024 + 1), episodeID: "1234"); preconditionFailure("Oversized model accepted") }
     catch is HGError { }
-    print("PASS mobile v5: 32 independent digest vectors, 4 carriers, exact gzip/identity binding, both model maps, refusal and size limits; bodyless video_tab GET carries only khronos/helios/medusa with the 7.4.3.32 tab query")
+    print("PASS mobile v5: 32 independent digest vectors, 4 carriers, exact gzip/identity binding, both model maps, refusal and size limits; bodyless video_tab GET carries only khronos/helios/medusa with the 7.4.3.32 tab query, the full official device context and klink_egdi when registered")
 }
 
 private func checkPlaybackHTTPResponses() async throws {

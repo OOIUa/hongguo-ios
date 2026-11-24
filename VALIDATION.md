@@ -1,5 +1,26 @@
 # iOS 验证记录
 
+## 0.1.33 / build 34：同步 Android PR #19 播放链路（2026-11-24）
+
+同步 hongguo-android `eca9db8`（PR #19，含 `c0821c6` 与 `bd85341`，对应 Android v0.8.0）：匿名设备注册后调用 `app_alert_check` 激活并解析 `klink_egdi`；播放 query 补齐官方设备上下文（28 项 + `klink_egdi`）；medusa 信封升级为 38 字段 deviceInfo、9 字段 env、f16 设备令牌、f15 嵌套常量与 `4480…` flags。信封算法在 `PlayerSignV5.js` 内实现，38 字段结构复用 `PureSign.js` 目录签名已有的 `deviceProto` 形态。
+
+`bd85341`（302 落地域白名单放宽、形状正常的被拒落地域换源重试）无需移植：iOS 的 `MediaRangeHTTP.allowedAfterRedirect` 本来就跟随任意公网 HTTPS 落地域（含 `bdcgslb.com`），明文、怪端口、带凭据和内网跳转仍终态且不触碰镜像，`ProgressiveTransportChecks` 已有断言覆盖。
+
+**服务端 A/B（macOS 实网探针，同一台刚注册并激活的匿名设备、同一分集《无限白粥》第 1 集，两轮一致）：**
+
+| 请求形态 | query 参数 | HTTP | 正文 | 结果 |
+| --- | --- | --- | --- | --- |
+| 旧信封 + 12 项设备 query（HEAD） | 21 | 200 | 0 字节 | 无片源 |
+| 新信封 + 完整设备 query + `klink_egdi` | 39 | 200 | 23,550 字节 | code 0，5 条清晰度 |
+
+注册响应实际下发 56 字符 `klink_egdi`；`app_alert_check` 返回 HTTP 200。对照组使用的是已激活设备，说明仅激活不足以恢复取源，信封与 query 升级是必要的。另两集（第 1、2 集）分别返回 23,550 与 14,643 字节的完整模型。
+
+**离线检查：** `scripts/test-network.sh` 通过，`MobilePlaybackChecks` 新增设备上下文字段、`klink_egdi` 携带与解析的断言；`scripts/test-progressive.sh` 通过（含真实 AVPlayer 首帧与 seek）。Xcode 27.2 / iOS 27.2 SDK 模拟器 Debug 构建通过。
+
+**模拟器（iPhone 18 Pro / iOS 27.0）：** `HongguoQATests.testV5PlaybackAndEpisodeSwitching` 通过（38.6 秒，0 失败）：搜索 → 详情 → 播放第 1 集 → 暂停/恢复 → 切第 2 集，导出截图确认真实画面与字幕。模拟器网络日志可见 App 进程连接 `log5-applog-lf.fqnovel.com`（注册与激活）、`api5-normal-sinfonlineb.fqnovel.com/reading/bookapi/video_tab/`（v5 取源）及 `*.bdcgslb.com` / `*.vegslb.com`（CDN 分块）。结果包 `/tmp/hongguo-v5-pr19.xcresult`。
+
+**未验证：** 无签名 IPA 未在实体 iPhone 安装；`readMobilePlayback`（v5 POST）与单集接口未单独做实网探针，仅随信封升级一并受益；激活请求在 XCTest 进程中的状态码未直接读取，由 macOS 探针确认。
+
 ## 0.1.32 / build 33 播放空响应修复（2026-11-23，beta.1 测试包）
 
 在 iPhone Duo 模拟器（iOS 27.1）上从 `DramaAPI.track(episodeID:seriesID:)` 发起取源。App 接口在进程内模拟，官网访客分集页、网页播放器取源、CDN 分块读取及 AVPlayer 解码走实网，每轮使用独立缓存。
